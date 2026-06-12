@@ -1,82 +1,46 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import axios from "axios";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 
+// Updated INDUSTRIES with all 8 verticals
 const INDUSTRIES = [
-  { id: "marketing",  label: "Marketing Analytics", icon: "📱", description: "CAC, LTV, ROI, CTR",            columns: "spend, installs, revenue, active_users" },
-  { id: "stock",      label: "Stock Market",         icon: "📈", description: "Returns, volatility, Sharpe",  columns: "date, open, high, low, close, volume" },
-  { id: "hr",         label: "HR Analytics",         icon: "👥", description: "Attrition, cost per hire",     columns: "employees, attrition, cost_per_hire, time_to_hire, engagement_score" },
-  { id: "sales",      label: "Sales Analytics",      icon: "💼", description: "Conversion, deal size, cycle", columns: "deal_size, status, sales_cycle_days" },
-  { id: "ecommerce",  label: "E-commerce",            icon: "🛒", description: "AOV, cart abandonment",       columns: "order_value, cart_abandoned, returned, converted" },
+  { id: "marketing", label: "📱 Marketing Analytics", description: "CAC, LTV, ROI, CTR for app and digital campaigns", columns: "spend, installs, revenue, active_users", icon: "📊" },
+  { id: "stock", label: "📈 Stock Market Analysis", description: "Returns, volatility, Sharpe ratio, win rate", columns: "date, close, volume", icon: "📉" },
+  { id: "research", label: "📚 Research Analytics", description: "h-index, citations, impact factor, funding trends", columns: "papers, citations, impact_factor", icon: "🔬" },
+  { id: "medical", label: "🏥 Medical Analytics", description: "Patient outcomes, readmission rates, cost per treatment", columns: "patients, readmissions, treatment_cost", icon: "💊" },
+  { id: "fintech", label: "💰 FinTech Analytics", description: "Transaction volume, loan amounts, default rates", columns: "transactions, loan_amount, default_rate", icon: "💳" },
+  { id: "hr", label: "👥 HR Analytics", description: "Attrition, cost per hire, engagement scores", columns: "employees, attrition, cost_per_hire, time_to_hire, engagement_score", icon: "👔" },
+  { id: "sales", label: "💼 Sales Analytics", description: "Conversion rate, deal size, sales cycle", columns: "deal_size, status, sales_cycle_days", icon: "🎯" },
+  { id: "ecommerce", label: "🛒 E-commerce Analytics", description: "AOV, cart abandonment, return rate", columns: "order_value, cart_abandoned, returned, converted", icon: "🛍️" }
 ];
-
-// Auto-detect environment: Railway in production, localhost in dev
-const API_URL = process.env.REACT_APP_API_URL ||
-  (window.location.hostname === "localhost"
-    ? "http://localhost:8000"
-    : "https://pathviz-production.up.railway.app");
 
 const MOCK_APIS = [
-  { id: "google_ads", label: "Google Ads",  color: "#4285f4", icon: "🔵" },
-  { id: "meta_ads",   label: "Meta Ads",    color: "#60a5fa", icon: "🔷" },
-  { id: "hubspot",    label: "HubSpot CRM", color: "#5eead4", icon: "🟠" },
+  { id: "google_ads", label: "Google Ads", color: "#4285f4", icon: "🔵" },
+  { id: "meta_ads", label: "Meta Ads", color: "#1877f2", icon: "🔷" },
+  { id: "hubspot", label: "HubSpot CRM", color: "#ff7a59", icon: "🟠" },
 ];
 
-const SUPABASE_URL      = "https://fydfhzulozwjncbnmmwa.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5ZGZoenVsb3p3am5jYm5tbXdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4NDY3NTcsImV4cCI6MjA5NTQyMjc1N30.6JCeGDkmhMWBph02qK3_EgxjBjHfE43_MsXlrCTmLqo";
-
-const G = {
-  bg:         "#0d1f1f",
-  bgCard:     "#112828",
-  bgElevated: "#163333",
-  teal:       "#2dd4bf",
-  tealDim:    "#0f766e",
-  tealMuted:  "#134e4a",
-  white:      "#f0fafa",
-  offwhite:   "#b2d8d8",
-  muted:      "#4d8080",
-  border:     "#1e3a3a",
-  green:      "#4ade80",
-  amber:      "#fbbf24",
-  red:        "#f87171",
-  purple:     "#a78bfa",
-  purpleDim:  "#4c1d95",
-  font:       "'Georgia', 'Times New Roman', serif",
-  fontSans:   "'Segoe UI', system-ui, sans-serif",
-};
-
-// ─── Status dot colours ───────────────────────────────────────────────────────
-const STATUS_COLOR = { excellent: G.green, warning: G.amber, info: G.teal };
+// Get API URL from environment variable
+const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 function App() {
-  const [file,       setFile]       = useState(null);
-  const [industry,   setIndustry]   = useState("marketing");
-  const [results,    setResults]    = useState(null);
-  const [loading,    setLoading]    = useState(false);
-  const [error,      setError]      = useState(null);
+  const [file, setFile] = useState(null);
+  const [industry, setIndustry] = useState("marketing");
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [dataSource, setDataSource] = useState("upload");
-  const [history,    setHistory]    = useState([]);
+  const [history, setHistory] = useState([]);
+  const [stockSymbol, setStockSymbol] = useState("RELIANCE.NS");
+  const [stockData, setStockData] = useState(null);
+  const [trendKeyword, setTrendKeyword] = useState("");
+  const [trendData, setTrendData] = useState(null);
 
   const selectedIndustry = INDUSTRIES.find(i => i.id === industry);
 
-  // ── Fetch history from Supabase ──────────────────────────────────────────
-  const fetchHistory = async () => {
-    try {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/analyses?select=*&order=created_at.desc&limit=10`,
-        { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } }
-      );
-      const data = await res.json();
-      if (Array.isArray(data)) setHistory(data);
-    } catch (err) { console.error("History fetch error:", err); }
-  };
-
-  useEffect(() => { fetchHistory(); }, []);
-
-  // ── File change ──────────────────────────────────────────────────────────
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
     setResults(null);
@@ -84,7 +48,6 @@ function App() {
     setDataSource("upload");
   };
 
-  // ── Analyse ──────────────────────────────────────────────────────────────
   const handleAnalyze = async (source = "upload", platform = "") => {
     setLoading(true);
     setError(null);
@@ -93,415 +56,307 @@ function App() {
     const formData = new FormData();
     formData.append("industry", industry);
 
-    if (source === "sample" || source === "mock_api") {
+    if (source === "sample") {
       formData.append("use_sample", "true");
-      if (platform) formData.append("mock_platform", platform);
+      if (!file) formData.append("file", new Blob(["placeholder"]), "placeholder.csv");
+    } else if (source === "mock_api") {
+      formData.append("mock_platform", platform);
+      if (!file) formData.append("file", new Blob(["placeholder"]), "placeholder.csv");
     } else {
-      if (!file) {
-        setError("Please select a CSV or Excel file first.");
-        setLoading(false);
-        return;
-      }
+      if (!file) { setError("Please select a CSV file first."); setLoading(false); return; }
       formData.append("file", file);
     }
 
     try {
-      const response = await axios.post(`${API_URL}/analyze`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-
-      const data = response.data;
-
-      // Backend returned a soft error
-      if (data.error) {
-        setError(data.error);
-        setLoading(false);
-        return;
-      }
-
-      setResults(data);
+      const response = await axios.post(`${API_URL}/analyze`, formData);
+      setResults(response.data);
       setDataSource(source === "mock_api" ? platform : source);
-      fetchHistory();
     } catch (err) {
-      console.error("Axios error:", err);
-      if (err.response) {
-        setError(`Server error ${err.response.status}: ${err.response.data?.detail || err.response.statusText}`);
-      } else if (err.request) {
-        setError("Cannot reach the backend. Make sure it is running on http://localhost:8000");
-      } else {
-        setError(`Unexpected error: ${err.message}`);
-      }
+      console.error("Analysis error:", err);
+      setError("Something went wrong. Check your CSV columns match the required format.");
+    }
+    setLoading(false);
+  };
+
+  const handleStockLookup = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await axios.get(`${API_URL}/stock/${stockSymbol}`);
+      setStockData(response.data);
+    } catch (err) {
+      setError("Failed to fetch stock data");
+    }
+    setLoading(false);
+  };
+
+  const handleTrendLookup = async () => {
+    if (!trendKeyword) return;
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API_URL}/trends/${trendKeyword}`);
+      setTrendData(response.data);
+    } catch (err) {
+      setError("Failed to fetch trends data");
     }
     setLoading(false);
   };
 
   return (
-    <div style={S.shell}>
+    <div style={styles.container}>
+      <div style={styles.header}>
+        <h1 style={styles.logo}>PathViz</h1>
+        <p style={styles.tagline}>AI-powered analytics for Indian growth teams</p>
+        <p style={styles.badge}>8 Industries • Real-time Stock • Google Trends • AI Insights</p>
+      </div>
 
-      {/* ── SIDEBAR ────────────────────────────────────────────────────── */}
-      <aside style={S.sidebar}>
-        <div style={S.sidebarInner}>
+      {/* Industries Grid */}
+      <div style={styles.section}>
+        <h2 style={styles.sectionTitle}>Select Your Industry</h2>
+        <div style={styles.industryGrid}>
+          {INDUSTRIES.map((ind) => (
+            <div key={ind.id} onClick={() => { setIndustry(ind.id); setResults(null); setError(null); }}
+              style={{ ...styles.industryCard, ...(industry === ind.id ? styles.industryCardActive : {}) }}>
+              <span style={styles.industryIcon}>{ind.icon}</span>
+              <p style={styles.industryLabel}>{ind.label}</p>
+              <p style={styles.industryDesc}>{ind.description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
 
-          <div style={S.brandBlock}>
-            <div style={S.brandName}>PathViz</div>
-            <div style={S.brandTagline}>Analytics for India</div>
+      {/* Stock Market Live Widget */}
+      <div style={styles.stockWidget}>
+        <h3 style={styles.widgetTitle}>📈 Live Stock Data (NSE/BSE)</h3>
+        <div style={styles.stockInputGroup}>
+          <input
+            type="text"
+            value={stockSymbol}
+            onChange={(e) => setStockSymbol(e.target.value)}
+            placeholder="Enter symbol (e.g., RELIANCE.NS, TCS.NS, HDFCBANK.NS)"
+            style={styles.stockInput}
+          />
+          <button onClick={handleStockLookup} style={styles.stockButton}>
+            Get Live Price
+          </button>
+        </div>
+        {stockData && (
+          <div style={styles.stockResult}>
+            <p><strong>{stockData.company_name}</strong> ({stockData.symbol})</p>
+            <p style={styles.stockPrice}>₹{stockData.current_price}</p>
+            <p style={{ color: stockData.day_change >= 0 ? '#22c55e' : '#ef4444' }}>
+              {stockData.day_change >= 0 ? '▲' : '▼'} {stockData.day_change} ({stockData.day_change_percent}%)
+            </p>
+            <div style={styles.stockMetrics}>
+              <span>Volume: {stockData.volume?.toLocaleString()}</span>
+              <span>P/E: {stockData.pe_ratio}</span>
+              <span>52W H/L: {stockData.week_52_high} / {stockData.week_52_low}</span>
+            </div>
           </div>
+        )}
+      </div>
 
-          <nav>
-            <p style={S.navLabel}>Industries</p>
-            {INDUSTRIES.map(ind => (
-              <div
-                key={ind.id}
-                onClick={() => { setIndustry(ind.id); setResults(null); setError(null); }}
-                style={{ ...S.navItem, ...(industry === ind.id ? S.navItemActive : {}) }}
-              >
-                <span style={S.navItemIcon}>{ind.icon}</span>
-                <div>
-                  <div style={{ ...S.navItemLabel, ...(industry === ind.id ? S.navItemLabelActive : {}) }}>
-                    {ind.label}
-                  </div>
-                  <div style={S.navItemDesc}>{ind.description}</div>
-                </div>
+      {/* Google Trends Widget */}
+      <div style={styles.trendWidget}>
+        <h3 style={styles.widgetTitle}>🔍 Google Trends</h3>
+        <div style={styles.trendInputGroup}>
+          <input
+            type="text"
+            value={trendKeyword}
+            onChange={(e) => setTrendKeyword(e.target.value)}
+            placeholder="Enter keyword (e.g., 'upi', 'crypto', 'mutual funds')"
+            style={styles.trendInput}
+          />
+          <button onClick={handleTrendLookup} style={styles.trendButton}>
+            Get Trends
+          </button>
+        </div>
+        {trendData && (
+          <div style={styles.trendResult}>
+            <p><strong>Keyword:</strong> {trendData.keyword}</p>
+            <p><strong>Current Interest:</strong> {trendData.current_interest}</p>
+            <p style={styles.trendNote}>{trendData.source}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Analysis Card */}
+      <div style={styles.card}>
+        <h2 style={styles.cardTitle}>Upload {selectedIndustry?.label} Data</h2>
+        <p style={styles.cardSubtitle}>Required columns: <strong style={{ color: "#6366f1" }}>{selectedIndustry?.columns}</strong></p>
+
+        <div style={styles.uploadArea}>
+          <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileChange} style={styles.fileInput} id="fileInput" />
+          <label htmlFor="fileInput" style={styles.fileLabel}>
+            {file ? `📄 ${file.name}` : "Choose CSV or Excel File"}
+          </label>
+        </div>
+
+        <button onClick={() => handleAnalyze("upload")}
+          style={loading ? styles.buttonLoading : styles.button} disabled={loading}>
+          {loading ? "Analyzing..." : `Analyze ${selectedIndustry?.label}`}
+        </button>
+
+        <div style={styles.divider}>
+          <span style={styles.dividerText}>OR TRY WITHOUT UPLOADING</span>
+        </div>
+
+        <button onClick={() => handleAnalyze("sample")}
+          style={styles.sampleButton} disabled={loading}>
+          🎲 Try Sample Data
+        </button>
+
+        {industry === "marketing" && (
+          <div style={styles.mockApiSection}>
+            <p style={styles.mockApiTitle}>Connect Mock API</p>
+            <div style={styles.mockApiGrid}>
+              {MOCK_APIS.map((api) => (
+                <button key={api.id} onClick={() => handleAnalyze("mock_api", api.id)}
+                  style={{ ...styles.mockApiButton, borderColor: api.color }} disabled={loading}>
+                  {api.icon} {api.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {error && <p style={styles.error}>{error}</p>}
+      </div>
+
+      {/* Results Section */}
+      {results && (
+        <div style={styles.resultsContainer}>
+          <h2 style={styles.resultsTitle}>{selectedIndustry?.label} — Analysis Results</h2>
+
+          {results.ai_used && (
+            <div style={styles.aiBadge}>🤖 AI-Powered Insights</div>
+          )}
+
+          <div style={styles.metricsGrid}>
+            {results.metrics && Object.entries(results.metrics).map(([key, value]) => (
+              <div key={key} style={styles.metricCard}>
+                <p style={styles.metricLabel}>{key}</p>
+                <p style={styles.metricValue}>{value}</p>
               </div>
             ))}
-          </nav>
+          </div>
 
-          {history.length > 0 && (
-            <div style={{ marginTop: "32px" }}>
-              <p style={S.navLabel}>Recent</p>
-              {history.slice(0, 5).map(item => (
-                <div key={item.id} style={S.historyRow}>
-                  <span style={S.historyName}>
-                    {INDUSTRIES.find(i => i.id === item.industry)?.icon} {item.industry}
-                  </span>
-                  <span style={S.historyDate}>
-                    {new Date(item.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
-                  </span>
+          {results.chart_data && results.chart_data.length > 0 && (
+            <div style={styles.chartCard}>
+              <h3 style={styles.chartTitle}>Performance vs India Benchmark</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={results.chart_data} margin={{ top: 10, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#f1f5f9" }} />
+                  <Legend />
+                  <Bar dataKey="Yours" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="India Avg" fill="#475569" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {results.insights && results.insights.length > 0 && (
+            <div style={styles.insightsSection}>
+              <h3 style={styles.insightsTitle}>💡 Key Insights</h3>
+              {results.insights.map((insight, index) => (
+                <div key={index} style={styles.insightCard}>
+                  <p style={{ ...styles.insightMessage, color: insight.status === "excellent" ? "#22c55e" : insight.status === "warning" ? "#f59e0b" : "#6366f1" }}>
+                    {insight.message}
+                  </p>
                 </div>
               ))}
             </div>
           )}
-        </div>
-      </aside>
 
-      {/* ── MAIN ───────────────────────────────────────────────────────── */}
-      <main style={S.main}>
-
-        {/* TOPBAR */}
-        <div style={S.topbar}>
-          <div>
-            <h1 style={S.pageTitle}>{selectedIndustry.icon} {selectedIndustry.label}</h1>
-            <p style={S.pageSub}>
-              Flexible columns — app auto-detects your data.&nbsp;
-              <span style={S.colList}>Expected: {selectedIndustry.columns}</span>
-            </p>
-          </div>
-          <div style={S.indiaBadge}>🇮🇳 India Benchmarks</div>
-        </div>
-
-        <div style={S.contentArea}>
-
-          {/* ── UPLOAD PANEL ─────────────────────────────────────────── */}
-          <div style={S.panel}>
-            <h2 style={S.panelHeading}>Upload Your Data</h2>
-            <p style={S.panelSub}>
-              CSV or Excel (.xlsx) — messy data, missing columns, encoding issues all handled automatically
-            </p>
-
-            {/* Hidden file input accepts csv + xlsx */}
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              onChange={handleFileChange}
-              style={{ display: "none" }}
-              id="fileInput"
-            />
-            <label htmlFor="fileInput" style={S.dropZone}>
-              <span style={S.dropIcon}>{file ? "📄" : "⬆️"}</span>
-              <div>
-                <div style={S.dropText}>{file ? file.name : "Click to choose a CSV or Excel file"}</div>
-                {!file && <div style={S.dropHint}>Any format, any columns — we'll figure it out</div>}
-              </div>
-            </label>
-
-            <button
-              onClick={() => handleAnalyze("upload")}
-              style={loading ? S.btnLoading : S.btn}
-              disabled={loading}
-            >
-              {loading ? "Analyzing…" : `Analyze ${selectedIndustry.label}`}
-            </button>
-
-            <div style={S.orRow}>
-              <div style={S.orLine} />
-              <span style={S.orText}>or try without uploading</span>
-              <div style={S.orLine} />
+          {results.predictions && results.predictions.length > 0 && (
+            <div style={styles.predictionsSection}>
+              <h3 style={styles.predictionsTitle}>🔮 Predictive Analytics</h3>
+              {results.predictions.map((pred, index) => (
+                <div key={index} style={styles.predictionCard}>
+                  <p><strong>{pred.metric}</strong></p>
+                  <p>Trend: {pred.trend} ({pred.direction})</p>
+                  <p>Confidence: {pred.confidence}%</p>
+                  <p style={styles.predictionAlert}>{pred.alert}</p>
+                </div>
+              ))}
             </div>
-
-            <button onClick={() => handleAnalyze("sample")} style={S.btnGhost} disabled={loading}>
-              🎲 Try Sample Data
-            </button>
-
-            {industry === "marketing" && (
-              <div style={{ marginTop: "20px" }}>
-                <p style={S.mockLabel}>Connect Mock API</p>
-                <div style={S.mockGrid}>
-                  {MOCK_APIS.map(api => (
-                    <button
-                      key={api.id}
-                      onClick={() => handleAnalyze("mock_api", api.id)}
-                      style={{ ...S.mockBtn, borderColor: api.color, color: api.color }}
-                      disabled={loading}
-                    >
-                      {api.icon} {api.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <div style={S.errorBox}>
-                <strong>⚠️ Error</strong><br />{error}
-              </div>
-            )}
-          </div>
-
-          {/* ── RESULTS ──────────────────────────────────────────────── */}
-          {results && (
-            <>
-              {/* Source badge */}
-              {dataSource !== "upload" && (
-                <div style={S.sourcePill}>
-                  {dataSource === "sample"     && "🎲 Sample Data"}
-                  {dataSource === "google_ads" && "🔵 Mock Google Ads API"}
-                  {dataSource === "meta_ads"   && "🔷 Mock Meta Ads API"}
-                  {dataSource === "hubspot"    && "🟠 Mock HubSpot CRM API"}
-                </div>
-              )}
-
-              {/* METRICS GRID */}
-              {results.metrics && (
-                <div style={S.metricsGrid}>
-                  {Object.entries(results.metrics).map(([key, value]) => {
-                    const sv = String(value);
-                    const bad  = sv.startsWith("-") || key.toLowerCase().includes("attrition") || key.toLowerCase().includes("abandon") || key.toLowerCase().includes("return rate");
-                    const good = !bad && (sv.includes("+") || (parseFloat(sv) > 1 && !key.toLowerCase().includes("cac") && !key.toLowerCase().includes("cycle")));
-                    const color = bad ? G.red : good ? G.green : G.teal;
-                    return (
-                      <div key={key} style={S.metricCard}>
-                        <div style={S.metricLabel}>{key}</div>
-                        <div style={{ ...S.metricValue, color }}>{value}</div>
-                        <div style={{ ...S.metricAccent, background: color }} />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* CHART */}
-              <div style={S.panel}>
-                <h2 style={S.panelHeading}>Performance vs India Benchmark</h2>
-                <p style={S.panelSub}>Source: {results.source}</p>
-                <div style={{ marginTop: "20px" }}>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={results.chart_data || []} margin={{ top: 10, right: 20, left: 0, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={G.border} vertical={false} />
-                      <XAxis dataKey="name" stroke={G.muted} fontSize={11} />
-                      <YAxis stroke={G.muted} fontSize={11} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: G.bgElevated, border: `1px solid ${G.border}`,
-                          borderRadius: "8px", color: G.white, fontSize: "13px"
-                        }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: "12px", color: G.offwhite }} />
-                      <Bar dataKey="Yours"     fill={G.teal}     radius={[4,4,0,0]} />
-                      <Bar dataKey="India Avg" fill={G.tealMuted} radius={[4,4,0,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* PREDICTIONS */}
-              {results.predictions && results.predictions.length > 0 && (
-                <div style={S.panel}>
-                  <h2 style={S.panelHeading}>3-Month Predictions</h2>
-                  <p style={S.panelSub}>Linear regression · scikit-learn</p>
-                  {results.predictions.map((pred, i) => (
-                    <div key={i} style={S.predCard}>
-                      <div style={S.predRow}>
-                        <span style={S.predMetric}>{pred.metric}</span>
-                        <span style={{ ...S.predTrend, color: pred.trend === "increasing" ? G.green : G.amber }}>
-                          {pred.direction} {pred.trend.toUpperCase()}
-                        </span>
-                      </div>
-                      <div style={S.predVals}>
-                        {pred.values.map((val, j) => (
-                          <div key={j} style={S.predVal}>
-                            <div style={S.predMonth}>Month {j+1}</div>
-                            <div style={S.predAmt}>{val}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <p style={{ ...S.predAlert, color: pred.trend === "increasing" ? G.green : G.amber }}>
-                        {pred.alert}
-                      </p>
-                      <p style={S.predConf}>Model confidence: {pred.confidence}%</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* RULE-BASED BENCHMARK INSIGHTS */}
-              <div style={S.panel}>
-                <h2 style={S.panelHeading}>India Benchmark Analysis</h2>
-                <p style={S.panelSub}>Source: {results.source || "Industry Report"}</p>
-                {(results.insights || []).map((insight, i) => (
-                  <div key={i} style={S.insightRow}>
-                    <div style={{ ...S.insightDot, background: STATUS_COLOR[insight.status] || G.teal }} />
-                    <p style={{ ...S.insightText, color: insight.status === "excellent" ? "#86efac" : "#fde68a" }}>
-                      {insight.message}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              {/* ── GROQ AI INSIGHTS ─────────────────────────────────── */}
-              {results.ai_insights && results.ai_insights.length > 0 && (
-                <div style={{ ...S.panel, border: `1px solid ${G.purpleDim}`, background: "#120d22" }}>
-                  {/* Header */}
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
-                    <div style={S.groqBadge}>✨ Groq AI</div>
-                    <h2 style={{ ...S.panelHeading, margin: 0 }}>AI-Powered Insights</h2>
-                  </div>
-                  <p style={S.panelSub}>Generated by Llama 3.1 via Groq — India market context</p>
-
-                  {results.ai_insights.map((insight, i) => (
-                    <div key={i} style={{ ...S.insightRow, borderColor: "#2e1f4a" }}>
-                      <div style={{
-                        width: "22px", height: "22px", borderRadius: "50%", flexShrink: 0,
-                        background: i === 0 ? "#22c55e22" : i === 1 ? "#f59e0b22" : "#a78bfa22",
-                        border: `1px solid ${i === 0 ? G.green : i === 1 ? G.amber : G.purple}`,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "11px", color: i === 0 ? G.green : i === 1 ? G.amber : G.purple,
-                        fontWeight: "700"
-                      }}>
-                        {i === 0 ? "✓" : i === 1 ? "!" : "→"}
-                      </div>
-                      <p style={{
-                        ...S.insightText,
-                        color: i === 0 ? "#86efac" : i === 1 ? "#fde68a" : "#c4b5fd"
-                      }}>
-                        {insight.message}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            </>
           )}
+
+          <div style={styles.sourceSection}>
+            <p style={styles.sourceText}>Source: {results.source}</p>
+          </div>
         </div>
-      </main>
+      )}
     </div>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
-const S = {
-  shell: { display: "flex", minHeight: "100vh", backgroundColor: G.bg, fontFamily: G.fontSans, color: G.white },
-
-  sidebar: {
-    width: "260px", backgroundColor: G.bgCard, borderRight: `1px solid ${G.border}`,
-    flexShrink: 0, position: "sticky", top: 0, height: "100vh", overflowY: "auto",
-  },
-  sidebarInner: { padding: "28px 20px" },
-  brandBlock: { marginBottom: "36px", paddingBottom: "24px", borderBottom: `1px solid ${G.border}` },
-  brandName: { fontFamily: G.font, fontSize: "34px", fontWeight: "700", color: G.teal, letterSpacing: "-1px", lineHeight: 1 },
-  brandTagline: { fontSize: "10px", color: G.muted, marginTop: "6px", letterSpacing: "2px", textTransform: "uppercase" },
-
-  navLabel: { fontSize: "10px", color: G.muted, letterSpacing: "2px", textTransform: "uppercase", marginBottom: "10px", marginTop: 0 },
-  navItem: { display: "flex", alignItems: "flex-start", gap: "12px", padding: "10px 12px", borderRadius: "8px", cursor: "pointer", marginBottom: "2px", transition: "background 0.15s" },
-  navItemActive: { backgroundColor: G.tealMuted },
-  navItemIcon: { fontSize: "16px", marginTop: "1px" },
-  navItemLabel: { fontSize: "13px", fontWeight: "600", color: G.offwhite },
-  navItemLabelActive: { color: G.teal },
-  navItemDesc: { fontSize: "11px", color: G.muted, marginTop: "2px" },
-
-  historyRow: { display: "flex", justifyContent: "space-between", padding: "6px 12px", marginBottom: "2px" },
-  historyName: { fontSize: "12px", color: G.muted, textTransform: "capitalize" },
-  historyDate: { fontSize: "11px", color: G.tealDim },
-
-  main: { flex: 1, display: "flex", flexDirection: "column" },
-  topbar: {
-    padding: "24px 40px", borderBottom: `1px solid ${G.border}`,
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    backgroundColor: G.bgCard, position: "sticky", top: 0, zIndex: 10,
-  },
-  pageTitle: { fontFamily: G.font, fontSize: "28px", fontWeight: "700", color: G.white, margin: 0, letterSpacing: "-0.5px" },
-  pageSub: { fontSize: "12px", color: G.muted, marginTop: "4px", marginBottom: 0 },
-  colList: { color: G.teal },
-  indiaBadge: { backgroundColor: G.tealMuted, color: G.teal, fontSize: "11px", fontWeight: "700", padding: "6px 14px", borderRadius: "20px", letterSpacing: "0.5px", border: `1px solid ${G.tealDim}` },
-
-  contentArea: { padding: "32px 40px", display: "flex", flexDirection: "column", gap: "20px" },
-
-  panel: { backgroundColor: G.bgCard, borderRadius: "12px", padding: "28px", border: `1px solid ${G.border}` },
-  panelHeading: { fontFamily: G.font, fontSize: "22px", fontWeight: "700", color: G.white, margin: "0 0 4px 0", letterSpacing: "-0.3px" },
-  panelSub: { fontSize: "12px", color: G.muted, margin: "0 0 20px 0" },
-
-  dropZone: {
-    display: "flex", alignItems: "center", gap: "14px",
-    padding: "22px", backgroundColor: G.bg, border: `1.5px dashed ${G.tealDim}`,
-    borderRadius: "10px", cursor: "pointer", marginBottom: "16px",
-  },
-  dropIcon: { fontSize: "28px" },
-  dropText: { fontSize: "14px", color: G.offwhite, fontWeight: "600" },
-  dropHint: { fontSize: "11px", color: G.muted, marginTop: "3px" },
-
-  btn: { width: "100%", padding: "14px", backgroundColor: G.teal, color: G.bg, border: "none", borderRadius: "10px", fontSize: "15px", fontWeight: "700", cursor: "pointer" },
-  btnLoading: { width: "100%", padding: "14px", backgroundColor: G.tealDim, color: G.offwhite, border: "none", borderRadius: "10px", fontSize: "15px", fontWeight: "700", cursor: "not-allowed" },
-  btnGhost: { width: "100%", padding: "13px", backgroundColor: "transparent", color: G.teal, border: `1.5px solid ${G.tealDim}`, borderRadius: "10px", fontSize: "14px", fontWeight: "600", cursor: "pointer" },
-
-  orRow: { display: "flex", alignItems: "center", gap: "12px", margin: "16px 0" },
-  orLine: { flex: 1, height: "1px", backgroundColor: G.border },
-  orText: { fontSize: "11px", color: G.muted, whiteSpace: "nowrap" },
-
-  mockLabel: { fontSize: "10px", color: G.muted, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: "10px", marginTop: 0 },
-  mockGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" },
-  mockBtn: { padding: "9px", backgroundColor: "transparent", border: "1.5px solid", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer" },
-
-  errorBox: { marginTop: "14px", backgroundColor: "#2d1010", border: "1px solid #7f2020", borderRadius: "8px", padding: "12px 16px", color: G.red, fontSize: "13px", lineHeight: "1.6" },
-
-  sourcePill: { backgroundColor: G.bgCard, border: `1px solid ${G.tealDim}`, borderRadius: "8px", padding: "10px 20px", textAlign: "center", color: G.teal, fontSize: "13px", fontWeight: "600" },
-
-  metricsGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "14px" },
-  metricCard: { backgroundColor: G.bgCard, borderRadius: "12px", padding: "22px", border: `1px solid ${G.border}`, position: "relative", overflow: "hidden" },
-  metricLabel: { fontSize: "11px", color: G.muted, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: "10px" },
-  metricValue: { fontFamily: G.font, fontSize: "28px", fontWeight: "700", letterSpacing: "-1px", lineHeight: 1 },
-  metricAccent: { width: "4px", height: "36px", borderRadius: "2px", position: "absolute", top: "22px", right: "22px" },
-
-  predCard: { backgroundColor: G.bg, borderRadius: "10px", padding: "18px", marginBottom: "12px", border: `1px solid ${G.border}` },
-  predRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" },
-  predMetric: { fontSize: "14px", fontWeight: "700", color: G.white },
-  predTrend: { fontSize: "11px", fontWeight: "700", letterSpacing: "1px" },
-  predVals: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginBottom: "12px" },
-  predVal: { textAlign: "center", backgroundColor: G.bgCard, borderRadius: "8px", padding: "10px", border: `1px solid ${G.border}` },
-  predMonth: { color: G.muted, fontSize: "10px", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.5px" },
-  predAmt: { color: G.teal, fontSize: "16px", fontWeight: "700", fontFamily: G.font },
-  predAlert: { fontSize: "13px", margin: "0 0 5px 0", fontWeight: "600" },
-  predConf: { color: G.muted, fontSize: "11px", margin: 0 },
-
-  insightRow: { display: "flex", alignItems: "flex-start", gap: "12px", padding: "12px 0", borderBottom: `1px solid ${G.border}` },
-  insightDot: { width: "8px", height: "8px", borderRadius: "50%", marginTop: "6px", flexShrink: 0 },
-  insightText: { fontSize: "14px", lineHeight: "1.6", margin: 0 },
-
-  groqBadge: {
-    background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
-    color: "#e9d5ff", fontSize: "10px", fontWeight: "700",
-    padding: "3px 10px", borderRadius: "20px", letterSpacing: "1px",
-    textTransform: "uppercase", flexShrink: 0,
-  },
+const styles = {
+  container: { minHeight: "100vh", backgroundColor: "#0f172a", padding: "40px 20px", fontFamily: "'Segoe UI', sans-serif" },
+  header: { textAlign: "center", marginBottom: "40px" },
+  logo: { fontSize: "48px", fontWeight: "800", color: "#6366f1", margin: "0", letterSpacing: "-1px" },
+  tagline: { color: "#94a3b8", fontSize: "16px", marginTop: "8px" },
+  badge: { color: "#22c55e", fontSize: "12px", marginTop: "8px", backgroundColor: "#1e293b", display: "inline-block", padding: "4px 12px", borderRadius: "20px" },
+  section: { maxWidth: "1200px", margin: "0 auto 32px auto" },
+  sectionTitle: { color: "#f1f5f9", fontSize: "20px", marginBottom: "16px" },
+  industryGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" },
+  industryCard: { backgroundColor: "#1e293b", borderRadius: "12px", padding: "16px", cursor: "pointer", border: "2px solid transparent", textAlign: "center" },
+  industryCardActive: { border: "2px solid #6366f1", backgroundColor: "#1e293b" },
+  industryIcon: { fontSize: "24px", display: "block", marginBottom: "8px" },
+  industryLabel: { color: "#f1f5f9", fontSize: "13px", fontWeight: "600", margin: "0 0 6px 0" },
+  industryDesc: { color: "#64748b", fontSize: "11px", margin: "0", lineHeight: "1.4" },
+  stockWidget: { backgroundColor: "#1e293b", borderRadius: "16px", padding: "20px", maxWidth: "900px", margin: "0 auto 20px auto" },
+  trendWidget: { backgroundColor: "#1e293b", borderRadius: "16px", padding: "20px", maxWidth: "900px", margin: "0 auto 20px auto" },
+  widgetTitle: { color: "#f1f5f9", fontSize: "18px", marginBottom: "16px" },
+  stockInputGroup: { display: "flex", gap: "10px", marginBottom: "16px" },
+  stockInput: { flex: 1, padding: "12px", backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "8px", color: "#f1f5f9" },
+  stockButton: { padding: "12px 24px", backgroundColor: "#6366f1", border: "none", borderRadius: "8px", color: "white", cursor: "pointer", fontWeight: "600" },
+  stockResult: { backgroundColor: "#0f172a", padding: "16px", borderRadius: "12px", textAlign: "center" },
+  stockPrice: { fontSize: "32px", fontWeight: "700", color: "#6366f1", margin: "8px 0" },
+  stockMetrics: { display: "flex", justifyContent: "center", gap: "16px", marginTop: "12px", fontSize: "12px", color: "#94a3b8" },
+  trendInputGroup: { display: "flex", gap: "10px", marginBottom: "16px" },
+  trendInput: { flex: 1, padding: "12px", backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "8px", color: "#f1f5f9" },
+  trendButton: { padding: "12px 24px", backgroundColor: "#22c55e", border: "none", borderRadius: "8px", color: "white", cursor: "pointer", fontWeight: "600" },
+  trendResult: { backgroundColor: "#0f172a", padding: "16px", borderRadius: "12px" },
+  trendNote: { fontSize: "11px", color: "#64748b", marginTop: "8px" },
+  card: { backgroundColor: "#1e293b", borderRadius: "16px", padding: "32px", maxWidth: "700px", margin: "0 auto 40px auto", boxShadow: "0 4px 24px rgba(0,0,0,0.3)" },
+  cardTitle: { color: "#f1f5f9", fontSize: "22px", margin: "0 0 8px 0" },
+  cardSubtitle: { color: "#94a3b8", fontSize: "14px", margin: "0 0 16px 0" },
+  uploadArea: { marginBottom: "16px" },
+  fileInput: { display: "none" },
+  fileLabel: { display: "block", padding: "14px 20px", backgroundColor: "#0f172a", border: "2px dashed #334155", borderRadius: "10px", color: "#94a3b8", cursor: "pointer", textAlign: "center", fontSize: "14px" },
+  button: { width: "100%", padding: "14px", backgroundColor: "#6366f1", color: "white", border: "none", borderRadius: "10px", fontSize: "16px", fontWeight: "600", cursor: "pointer" },
+  buttonLoading: { width: "100%", padding: "14px", backgroundColor: "#4338ca", color: "white", border: "none", borderRadius: "10px", fontSize: "16px", fontWeight: "600", cursor: "not-allowed" },
+  divider: { display: "flex", alignItems: "center", margin: "20px 0" },
+  dividerText: { color: "#334155", fontSize: "11px", letterSpacing: "1px", margin: "0 auto", backgroundColor: "#1e293b", padding: "0 12px" },
+  sampleButton: { width: "100%", padding: "12px", backgroundColor: "transparent", color: "#6366f1", border: "2px solid #6366f1", borderRadius: "10px", fontSize: "15px", fontWeight: "600", cursor: "pointer", marginBottom: "16px" },
+  mockApiSection: { marginTop: "8px" },
+  mockApiTitle: { color: "#94a3b8", fontSize: "13px", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "10px" },
+  mockApiGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px" },
+  mockApiButton: { padding: "10px", backgroundColor: "transparent", color: "#f1f5f9", border: "2px solid", borderRadius: "8px", fontSize: "13px", fontWeight: "600", cursor: "pointer" },
+  error: { color: "#f87171", fontSize: "14px", marginTop: "12px" },
+  resultsContainer: { maxWidth: "900px", margin: "0 auto" },
+  resultsTitle: { color: "#f1f5f9", fontSize: "24px", textAlign: "center", marginBottom: "16px" },
+  aiBadge: { backgroundColor: "#6366f1", color: "white", padding: "8px 16px", borderRadius: "20px", textAlign: "center", display: "inline-block", marginBottom: "20px", fontSize: "12px" },
+  metricsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "16px", marginBottom: "24px" },
+  metricCard: { backgroundColor: "#1e293b", borderRadius: "12px", padding: "16px", textAlign: "center", border: "1px solid #6366f1" },
+  metricLabel: { color: "#94a3b8", fontSize: "11px", margin: "0 0 6px 0", textTransform: "uppercase", letterSpacing: "1px" },
+  metricValue: { color: "#6366f1", fontSize: "18px", fontWeight: "700", margin: "0" },
+  chartCard: { backgroundColor: "#1e293b", borderRadius: "12px", padding: "20px", marginBottom: "20px" },
+  chartTitle: { color: "#f1f5f9", fontSize: "16px", margin: "0 0 16px 0" },
+  insightsSection: { backgroundColor: "#1e293b", borderRadius: "12px", padding: "20px", marginBottom: "20px" },
+  insightsTitle: { color: "#f1f5f9", fontSize: "16px", marginBottom: "12px" },
+  insightCard: { padding: "12px", backgroundColor: "#0f172a", borderRadius: "8px", marginBottom: "8px" },
+  insightMessage: { fontSize: "13px", margin: "0", lineHeight: "1.5" },
+  predictionsSection: { backgroundColor: "#1e293b", borderRadius: "12px", padding: "20px", marginBottom: "20px" },
+  predictionsTitle: { color: "#f1f5f9", fontSize: "16px", marginBottom: "12px" },
+  predictionCard: { backgroundColor: "#0f172a", borderRadius: "8px", padding: "12px", marginBottom: "8px" },
+  predictionAlert: { color: "#f59e0b", fontSize: "12px", marginTop: "6px" },
+  sourceSection: { backgroundColor: "#1e293b", borderRadius: "12px", padding: "12px", textAlign: "center" },
+  sourceText: { color: "#64748b", fontSize: "11px", margin: "0" }
 };
 
 export default App;
