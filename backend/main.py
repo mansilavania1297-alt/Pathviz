@@ -73,32 +73,26 @@ BENCHMARKS = {
 }
 
 # ─── Column Fuzzy Mapper ─────────────────────────────────────────────────────
-# Maps any reasonable column name variation → canonical name
 COLUMN_ALIASES = {
-    # Marketing
     "spend": ["spend", "cost", "ad_spend", "adspend", "budget", "expenditure", "expense", "marketing_spend", "total_spend"],
     "installs": ["installs", "install", "downloads", "acquisitions", "new_users", "signups", "registrations"],
     "revenue": ["revenue", "rev", "income", "sales", "total_revenue", "earnings", "gmv", "turnover"],
     "active_users": ["active_users", "activeusers", "dau", "mau", "users", "retention", "engaged_users"],
-    # Stock
     "close": ["close", "closing", "closing_price", "price", "close_price", "last", "adj_close", "adjusted_close"],
     "volume": ["volume", "vol", "trade_volume", "shares_traded", "qty"],
     "date": ["date", "time", "timestamp", "trading_date", "day", "period"],
     "open": ["open", "open_price", "opening"],
     "high": ["high", "day_high", "max"],
     "low": ["low", "day_low", "min"],
-    # HR
     "employees": ["employees", "headcount", "total_employees", "staff", "workforce", "num_employees"],
     "attrition": ["attrition", "attrition_rate", "turnover", "turnover_rate", "churn", "resignations"],
     "cost_per_hire": ["cost_per_hire", "hiring_cost", "recruitment_cost", "cost_hire"],
     "time_to_hire": ["time_to_hire", "days_to_hire", "hiring_days", "ttf", "tat"],
     "engagement_score": ["engagement_score", "engagement", "esat", "employee_satisfaction", "morale"],
-    # Sales
     "deal_size": ["deal_size", "deal_value", "contract_value", "revenue", "amount", "deal_amount", "order_value"],
     "status": ["status", "stage", "outcome", "result", "deal_status"],
     "sales_cycle_days": ["sales_cycle_days", "cycle_days", "days_to_close", "sales_cycle", "close_time"],
     "win_rate": ["win_rate", "win", "won", "closed_won", "success_rate"],
-    # Ecommerce
     "order_value": ["order_value", "aov", "basket_size", "cart_value", "purchase_value", "amount", "revenue"],
     "cart_abandoned": ["cart_abandoned", "abandoned", "abandoned_carts", "cart_abandonment", "bounced"],
     "returned": ["returned", "returns", "refunded", "return_rate", "refunds"],
@@ -106,7 +100,6 @@ COLUMN_ALIASES = {
 }
 
 def fuzzy_map_columns(df):
-    """Rename dataframe columns to canonical names using alias mapping."""
     df.columns = df.columns.str.lower().str.strip().str.replace(" ", "_").str.replace("-", "_")
     rename_map = {}
     for canonical, aliases in COLUMN_ALIASES.items():
@@ -117,23 +110,13 @@ def fuzzy_map_columns(df):
     return df.rename(columns=rename_map)
 
 def safe_col(df, name, default=0):
-    """Get a column or return a Series of defaults."""
     if name in df.columns:
         return pd.to_numeric(df[name], errors="coerce").fillna(default)
     return pd.Series([default] * len(df))
 
 # ─── Robust File Reader ──────────────────────────────────────────────────────
 def read_uploaded_file(contents: bytes, filename: str = "") -> pd.DataFrame:
-    """
-    Read CSV or Excel with full tolerance:
-    - Auto-detect encoding
-    - Skip bad rows
-    - Handle multiple sheets (first sheet)
-    - Drop fully empty rows/columns
-    """
     filename = filename.lower()
-
-    # Excel files
     if filename.endswith(".xlsx") or filename.endswith(".xls"):
         try:
             df = pd.read_excel(io.BytesIO(contents), sheet_name=0, header=0)
@@ -141,17 +124,14 @@ def read_uploaded_file(contents: bytes, filename: str = "") -> pd.DataFrame:
             return df
         except Exception as e:
             raise ValueError(f"Could not read Excel file: {e}")
-
-    # CSV — detect encoding first
     detected = chardet.detect(contents)
     encoding = detected.get("encoding") or "utf-8"
-
     for enc in [encoding, "utf-8", "latin-1", "cp1252", "utf-16"]:
         try:
             text = contents.decode(enc, errors="replace")
             df = pd.read_csv(
                 io.StringIO(text),
-                on_bad_lines="skip",       # skip rows with wrong column count
+                on_bad_lines="skip",
                 skip_blank_lines=True,
                 low_memory=False,
             )
@@ -160,7 +140,6 @@ def read_uploaded_file(contents: bytes, filename: str = "") -> pd.DataFrame:
                 return df
         except Exception:
             continue
-
     raise ValueError("Could not parse file. Please check if it's a valid CSV or Excel file.")
 
 # ─── Predict Trend ────────────────────────────────────────────────────────────
@@ -219,7 +198,6 @@ Be direct. No bullet symbols. Start each line with the number and period."""
             statuses = ["excellent", "warning", "info"]
             insights = []
             for i, line in enumerate(lines[:3]):
-                # Strip leading "1. " "2. " etc
                 if len(line) > 2 and line[0].isdigit() and line[1] in ".)":
                     line = line[2:].strip()
                 insights.append({"status": statuses[i], "message": line})
@@ -254,7 +232,6 @@ def sample_marketing():
     return pd.DataFrame(rows)
 
 def sample_stock():
-    """Realistic NSE-style data (Nifty 50 range approximate)"""
     rows = []
     price = random.uniform(18000, 22000)
     for i in range(30):
@@ -320,7 +297,6 @@ SAMPLE_GENERATORS = {
 }
 
 # ─── Industry Analyzers ──────────────────────────────────────────────────────
-
 def analyze_marketing(df):
     df = fuzzy_map_columns(df)
     spend = safe_col(df, "spend").sum()
@@ -380,7 +356,6 @@ def analyze_marketing(df):
         "ai_insights": ai_insights,
         "source": b["source"]
     }
-
 
 def analyze_stock(df):
     df = fuzzy_map_columns(df)
@@ -444,7 +419,6 @@ def analyze_stock(df):
         "source": b["source"]
     }
 
-
 def analyze_hr(df):
     df = fuzzy_map_columns(df)
     attrition = safe_col(df, "attrition").mean()
@@ -492,7 +466,6 @@ def analyze_hr(df):
         "source": b["source"]
     }
 
-
 def analyze_sales(df):
     df = fuzzy_map_columns(df)
     deal_size = safe_col(df, "deal_size")
@@ -501,7 +474,6 @@ def analyze_sales(df):
     avg_deal = round(float(deal_size.mean()), 0)
     avg_cycle = round(float(cycle_days.mean()), 1)
 
-    # Win rate from status column
     win_rate = 30.0
     if "status" in df.columns:
         won = df["status"].str.lower().isin(["won", "closed won", "win", "closed", "success"]).sum()
@@ -554,7 +526,6 @@ def analyze_sales(df):
         "ai_insights": ai_insights,
         "source": b["source"]
     }
-
 
 def analyze_ecommerce(df):
     df = fuzzy_map_columns(df)
@@ -634,6 +605,102 @@ def home():
 def health():
     return {"status": "ok", "groq": bool(GROQ_API_KEY), "supabase": bool(SUPABASE_KEY)}
 
+# ============================================
+# LIVE STOCK DATA ENDPOINT
+# ============================================
+
+@app.get("/stock/{symbol}")
+async def get_live_stock(symbol: str):
+    """
+    Fetch live stock data from Yahoo Finance.
+    Supports NSE symbols (add .NS suffix) and BSE symbols (add .BO suffix)
+    Example: /stock/RELIANCE.NS, /stock/TCS.NS, /stock/HDFCBANK.NS
+    """
+    try:
+        import yfinance as yf
+        
+        # Format symbol for NSE/BSE
+        original_symbol = symbol.upper()
+        
+        # If user didn't specify exchange, try both NSE and BSE
+        if not original_symbol.endswith(".NS") and not original_symbol.endswith(".BO"):
+            # Try NSE first
+            nse_symbol = original_symbol + ".NS"
+            ticker = yf.Ticker(nse_symbol)
+            info = ticker.info
+            
+            # Check if we got valid data
+            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+            
+            # If no data from NSE, try BSE
+            if current_price == 0:
+                bse_symbol = original_symbol + ".BO"
+                ticker = yf.Ticker(bse_symbol)
+                info = ticker.info
+                current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+        else:
+            ticker = yf.Ticker(original_symbol)
+            info = ticker.info
+            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+        
+        # Get 3 months of history for predictions
+        hist = ticker.history(period="3mo")
+        
+        # Calculate basic metrics if history exists
+        metrics = {}
+        prediction = None
+        
+        if not hist.empty and len(hist) > 5:
+            hist['Return'] = hist['Close'].pct_change()
+            avg_return = hist['Return'].mean() * 100
+            volatility = hist['Return'].std() * 100
+            metrics = {
+                "avg_daily_return": f"{round(avg_return, 2)}%",
+                "volatility": f"{round(volatility, 2)}%",
+                "sharpe_ratio": round(avg_return / volatility, 2) if volatility > 0 else 0
+            }
+            
+            # Predict next 30 days using linear regression
+            close_values = hist['Close'].values.tolist()
+            if len(close_values) >= 10:
+                x = np.array(range(len(close_values))).reshape(-1, 1)
+                y = np.array(close_values)
+                model = LinearRegression()
+                model.fit(x, y)
+                future_x = np.array(range(len(close_values), len(close_values) + 30)).reshape(-1, 1)
+                future_prices = model.predict(future_x)
+                prediction = {
+                    "next_30_days": [round(float(p), 2) for p in future_prices[:5]],
+                    "trend": "increasing" if model.coef_[0] > 0 else "decreasing",
+                    "confidence": round(float(model.score(x, y)) * 100, 1)
+                }
+        
+        # Get company name
+        company_name = info.get("longName") or info.get("shortName") or original_symbol.replace(".NS", "").replace(".BO", "")
+        
+        return {
+            "symbol": original_symbol,
+            "company_name": company_name,
+            "current_price": current_price,
+            "day_change": info.get("regularMarketChange", 0),
+            "day_change_percent": info.get("regularMarketChangePercent", 0),
+            "volume": info.get("volume", 0),
+            "market_cap": info.get("marketCap", 0),
+            "pe_ratio": info.get("trailingPE", 0),
+            "week_52_high": info.get("fiftyTwoWeekHigh", 0),
+            "week_52_low": info.get("fiftyTwoWeekLow", 0),
+            **metrics,
+            "prediction": prediction
+        }
+    except ImportError:
+        return {"error": "yfinance not installed. Run: pip install yfinance", "symbol": symbol.upper()}
+    except Exception as e:
+        return {"error": str(e), "symbol": symbol.upper()}
+
+# ============================================
+# MAIN ANALYZE ENDPOINT
+# ============================================
+
 @app.post("/analyze")
 async def analyze_csv(
     file: UploadFile = File(None),
@@ -676,3 +743,11 @@ async def analyze_csv(
         import traceback
         traceback.print_exc()
         return {"error": f"Analysis failed: {str(e)}"}
+
+# ============================================
+# RUN THE SERVER (MUST BE AT THE VERY BOTTOM)
+# ============================================
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
