@@ -10,8 +10,13 @@ import random
 import chardet
 from datetime import datetime, timedelta
 from sklearn.linear_model import LinearRegression
+from cachetools import TTLCache
 
 load_dotenv()
+
+# ─── Cache for Real-time Data (TTL = 5 minutes) ─────────────────────────────
+# Prevents hitting API rate limits and speeds up responses
+cache = TTLCache(maxsize=100, ttl=300)  # 100 items, 5 minutes expiry
 
 # ─── Supabase ────────────────────────────────────────────────────────────────
 SUPABASE_URL = "https://fydfhzulozwjncbnmmwa.supabase.co"
@@ -27,7 +32,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if GROQ_API_KEY:
     print("✅ Groq AI is ready!")
 else:
-    print("⚠️  No GROQ_API_KEY found — AI insights disabled.")
+    print("⚠️ No GROQ_API_KEY found — AI insights disabled.")
 
 app = FastAPI()
 app.add_middleware(
@@ -47,56 +52,49 @@ app.add_middleware(
 
 # ─── India Benchmarks ────────────────────────────────────────────────────────
 BENCHMARKS = {
-    "marketing": {
-        "avg_cac": 85.0, "avg_ltv": 210.0, "avg_roi": 85.0,
-        "source": "AppsFlyer India Mobile Marketing Report 2024"
-    },
-    "stock": {
-        "avg_annual_return": 12.5, "avg_volatility": 18.0, "avg_sharpe": 0.65,
-        "source": "NSE India Historical Data 2024"
-    },
-    "hr": {
-        "avg_attrition": 18.0, "avg_cost_per_hire": 45000.0,
-        "avg_time_to_hire": 35.0, "avg_engagement": 65.0,
-        "source": "SHRM India HR Benchmarking Report 2024"
-    },
-    "sales": {
-        "avg_conversion": 22.0, "avg_deal_size": 85000.0,
-        "avg_cycle_days": 42.0, "avg_win_rate": 30.0,
-        "source": "LinkedIn India Sales Report 2024"
-    },
-    "ecommerce": {
-        "avg_aov": 1250.0, "avg_cart_abandonment": 68.0,
-        "avg_return_rate": 12.0, "avg_conversion": 2.8,
-        "source": "Unicommerce India E-commerce Report 2024"
-    }
+    "marketing": {"avg_cac": 85.0, "avg_ltv": 210.0, "avg_roi": 85.0, "source": "AppsFlyer India 2024"},
+    "stock": {"avg_annual_return": 12.5, "avg_volatility": 18.0, "avg_sharpe": 0.65, "source": "NSE India 2024"},
+    "hr": {"avg_attrition": 18.0, "avg_cost_per_hire": 45000.0, "avg_time_to_hire": 35.0, "avg_engagement": 65.0, "source": "SHRM India 2024"},
+    "sales": {"avg_conversion": 22.0, "avg_deal_size": 85000.0, "avg_cycle_days": 42.0, "avg_win_rate": 30.0, "source": "LinkedIn India 2024"},
+    "ecommerce": {"avg_aov": 1250.0, "avg_cart_abandonment": 68.0, "avg_return_rate": 12.0, "avg_conversion": 2.8, "source": "Unicommerce India 2024"},
+    "research": {"avg_h_index": 15.0, "avg_citations_per_paper": 25.0, "avg_impact_factor": 2.5, "source": "Scopus India 2024"},
+    "medical": {"avg_patient_outcome": 85.0, "avg_readmission_rate": 15.0, "avg_cost_per_treatment": 25000.0, "source": "NHA India 2024"},
+    "fintech": {"avg_customer_acquisition": 450.0, "avg_transaction_value": 2500.0, "avg_apr": 12.0, "source": "RBI FinTech Report 2024"},
 }
 
 # ─── Column Fuzzy Mapper ─────────────────────────────────────────────────────
 COLUMN_ALIASES = {
-    "spend": ["spend", "cost", "ad_spend", "adspend", "budget", "expenditure", "expense", "marketing_spend", "total_spend"],
-    "installs": ["installs", "install", "downloads", "acquisitions", "new_users", "signups", "registrations"],
-    "revenue": ["revenue", "rev", "income", "sales", "total_revenue", "earnings", "gmv", "turnover"],
-    "active_users": ["active_users", "activeusers", "dau", "mau", "users", "retention", "engaged_users"],
-    "close": ["close", "closing", "closing_price", "price", "close_price", "last", "adj_close", "adjusted_close"],
-    "volume": ["volume", "vol", "trade_volume", "shares_traded", "qty"],
-    "date": ["date", "time", "timestamp", "trading_date", "day", "period"],
-    "open": ["open", "open_price", "opening"],
-    "high": ["high", "day_high", "max"],
-    "low": ["low", "day_low", "min"],
-    "employees": ["employees", "headcount", "total_employees", "staff", "workforce", "num_employees"],
-    "attrition": ["attrition", "attrition_rate", "turnover", "turnover_rate", "churn", "resignations"],
-    "cost_per_hire": ["cost_per_hire", "hiring_cost", "recruitment_cost", "cost_hire"],
-    "time_to_hire": ["time_to_hire", "days_to_hire", "hiring_days", "ttf", "tat"],
-    "engagement_score": ["engagement_score", "engagement", "esat", "employee_satisfaction", "morale"],
-    "deal_size": ["deal_size", "deal_value", "contract_value", "revenue", "amount", "deal_amount", "order_value"],
+    "spend": ["spend", "cost", "ad_spend", "budget", "expense", "marketing_spend"],
+    "installs": ["installs", "downloads", "acquisitions", "new_users", "signups"],
+    "revenue": ["revenue", "income", "sales", "total_revenue", "earnings", "gmv"],
+    "active_users": ["active_users", "activeusers", "dau", "mau", "users", "retention"],
+    "close": ["close", "closing_price", "price", "adj_close"],
+    "volume": ["volume", "vol", "trade_volume", "shares_traded"],
+    "date": ["date", "time", "timestamp", "trading_date", "day"],
+    "employees": ["employees", "headcount", "total_employees", "staff", "workforce"],
+    "attrition": ["attrition", "attrition_rate", "turnover", "churn"],
+    "cost_per_hire": ["cost_per_hire", "hiring_cost", "recruitment_cost"],
+    "time_to_hire": ["time_to_hire", "days_to_hire", "hiring_days", "tat"],
+    "engagement_score": ["engagement_score", "engagement", "esat"],
+    "deal_size": ["deal_size", "deal_value", "contract_value", "deal_amount"],
     "status": ["status", "stage", "outcome", "result", "deal_status"],
-    "sales_cycle_days": ["sales_cycle_days", "cycle_days", "days_to_close", "sales_cycle", "close_time"],
-    "win_rate": ["win_rate", "win", "won", "closed_won", "success_rate"],
-    "order_value": ["order_value", "aov", "basket_size", "cart_value", "purchase_value", "amount", "revenue"],
-    "cart_abandoned": ["cart_abandoned", "abandoned", "abandoned_carts", "cart_abandonment", "bounced"],
-    "returned": ["returned", "returns", "refunded", "return_rate", "refunds"],
-    "converted": ["converted", "conversions", "purchases", "completed_orders", "orders"],
+    "sales_cycle_days": ["sales_cycle_days", "cycle_days", "days_to_close"],
+    "order_value": ["order_value", "aov", "basket_size", "cart_value"],
+    "cart_abandoned": ["cart_abandoned", "abandoned", "abandoned_carts"],
+    "returned": ["returned", "returns", "refunded", "return_rate"],
+    "converted": ["converted", "conversions", "purchases", "completed_orders"],
+    # Research columns
+    "papers": ["papers", "publications", "articles", "documents"],
+    "citations": ["citations", "total_citations", "cites", "ref_count"],
+    "impact_factor": ["impact_factor", "if", "journal_if", "jif"],
+    # Medical columns
+    "patients": ["patients", "total_patients", "cases", "admissions"],
+    "readmissions": ["readmissions", "readmission_rate", "rehospitalizations"],
+    "treatment_cost": ["treatment_cost", "cost_per_treatment", "procedure_cost", "avg_cost"],
+    # FinTech columns
+    "transactions": ["transactions", "txn_count", "total_transactions", "payments"],
+    "loan_amount": ["loan_amount", "loan_value", "disbursement", "principal"],
+    "default_rate": ["default_rate", "defaults", "delinquency", "npd_rate"],
 }
 
 def fuzzy_map_columns(df):
@@ -114,7 +112,6 @@ def safe_col(df, name, default=0):
         return pd.to_numeric(df[name], errors="coerce").fillna(default)
     return pd.Series([default] * len(df))
 
-# ─── Robust File Reader ──────────────────────────────────────────────────────
 def read_uploaded_file(contents: bytes, filename: str = "") -> pd.DataFrame:
     filename = filename.lower()
     if filename.endswith(".xlsx") or filename.endswith(".xls"):
@@ -129,12 +126,7 @@ def read_uploaded_file(contents: bytes, filename: str = "") -> pd.DataFrame:
     for enc in [encoding, "utf-8", "latin-1", "cp1252", "utf-16"]:
         try:
             text = contents.decode(enc, errors="replace")
-            df = pd.read_csv(
-                io.StringIO(text),
-                on_bad_lines="skip",
-                skip_blank_lines=True,
-                low_memory=False,
-            )
+            df = pd.read_csv(io.StringIO(text), on_bad_lines="skip", skip_blank_lines=True, low_memory=False)
             df = df.dropna(how="all").dropna(axis=1, how="all")
             if not df.empty:
                 return df
@@ -142,7 +134,6 @@ def read_uploaded_file(contents: bytes, filename: str = "") -> pd.DataFrame:
             continue
     raise ValueError("Could not parse file. Please check if it's a valid CSV or Excel file.")
 
-# ─── Predict Trend ────────────────────────────────────────────────────────────
 def predict_trend(values, periods_ahead=3):
     values = [v for v in values if v is not None and not np.isnan(v)]
     if len(values) < 2:
@@ -161,7 +152,6 @@ def predict_trend(values, periods_ahead=3):
         "confidence": round(float(r_squared) * 100, 1)
     }
 
-# ─── Groq AI Insights ────────────────────────────────────────────────────────
 def get_ai_insights(metrics: dict, industry: str):
     if not GROQ_API_KEY:
         return None
@@ -175,8 +165,7 @@ Give exactly 3 short insights (max 20 words each):
 1. One strength
 2. One area to improve
 3. One India-market specific tip
-Be direct. No bullet symbols. Start each line with the number and period."""
-
+Be direct. Start each line with the number and period."""
     try:
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -206,7 +195,6 @@ Be direct. No bullet symbols. Start each line with the number and period."""
         print(f"Groq error: {e}")
     return None
 
-# ─── Supabase Save ────────────────────────────────────────────────────────────
 def save_to_supabase(industry, metrics, insights, predictions):
     try:
         requests.post(
@@ -218,7 +206,312 @@ def save_to_supabase(industry, metrics, insights, predictions):
     except Exception as e:
         print(f"Supabase save error: {e}")
 
-# ─── Sample Data Generators ──────────────────────────────────────────────────
+# ============================================
+# 1. MARKETING ANALYZER
+# ============================================
+def analyze_marketing(df):
+    df = fuzzy_map_columns(df)
+    spend = safe_col(df, "spend").sum()
+    installs = safe_col(df, "installs").sum()
+    revenue = safe_col(df, "revenue").sum()
+    active = safe_col(df, "active_users").sum() or installs * 0.7
+    cac = round(spend / installs, 2) if installs > 0 else 0
+    ltv = round(revenue / active, 2) if active > 0 else 0
+    roi = round(((revenue - spend) / spend) * 100, 2) if spend > 0 else 0
+    b = BENCHMARKS["marketing"]
+    return {
+        "industry": "marketing",
+        "metrics": {"CAC": f"₹{cac}", "LTV": f"₹{ltv}", "ROI": f"{roi}%"},
+        "chart_data": [
+            {"name": "CAC", "Yours": cac, "India Avg": b["avg_cac"]},
+            {"name": "LTV", "Yours": ltv, "India Avg": b["avg_ltv"]},
+            {"name": "ROI", "Yours": roi, "India Avg": b["avg_roi"]},
+        ],
+        "predictions": [],
+        "insights": [{"status": "info", "message": "Marketing analysis complete"}],
+        "source": b["source"]
+    }
+
+# ============================================
+# 2. RESEARCH ANALYSIS (Citations, h-index)
+# ============================================
+def analyze_research(df):
+    df = fuzzy_map_columns(df)
+    papers = safe_col(df, "papers").sum() or len(df)
+    citations = safe_col(df, "citations").sum()
+    avg_citations = round(citations / papers, 2) if papers > 0 else 0
+    
+    # Calculate h-index from citation list
+    citation_list = safe_col(df, "citations").tolist()
+    citation_list.sort(reverse=True)
+    h_index = 0
+    for i, cite in enumerate(citation_list, 1):
+        if cite >= i:
+            h_index = i
+        else:
+            break
+    
+    b = BENCHMARKS["research"]
+    return {
+        "industry": "research",
+        "metrics": {
+            "Total Papers": f"{int(papers)}",
+            "Total Citations": f"{int(citations)}",
+            "Avg Citations/Paper": avg_citations,
+            "h-index": h_index
+        },
+        "chart_data": [
+            {"name": "h-index", "Yours": h_index, "India Avg": b["avg_h_index"]},
+            {"name": "Avg Citations", "Yours": avg_citations, "India Avg": b["avg_citations_per_paper"]},
+        ],
+        "predictions": [],
+        "insights": [],
+        "source": b["source"]
+    }
+
+# ============================================
+# 3. MEDICAL ANALYSIS (Patient outcomes)
+# ============================================
+def analyze_medical(df):
+    df = fuzzy_map_columns(df)
+    patients = safe_col(df, "patients").sum() or len(df)
+    readmissions = safe_col(df, "readmissions").sum()
+    readmission_rate = round((readmissions / patients) * 100, 2) if patients > 0 else 0
+    treatment_cost = round(safe_col(df, "treatment_cost").mean(), 2)
+    
+    b = BENCHMARKS["medical"]
+    return {
+        "industry": "medical",
+        "metrics": {
+            "Total Patients": f"{int(patients)}",
+            "Readmission Rate": f"{readmission_rate}%",
+            "Avg Treatment Cost": f"₹{treatment_cost:,.0f}"
+        },
+        "chart_data": [
+            {"name": "Readmission %", "Yours": readmission_rate, "India Avg": b["avg_readmission_rate"]},
+            {"name": "Treatment Cost (₹K)", "Yours": round(treatment_cost/1000, 1), "India Avg": round(b["avg_cost_per_treatment"]/1000, 1)},
+        ],
+        "predictions": [],
+        "insights": [],
+        "source": b["source"]
+    }
+
+# ============================================
+# 4. FINTECH ANALYSIS
+# ============================================
+def analyze_fintech(df):
+    df = fuzzy_map_columns(df)
+    transactions = safe_col(df, "transactions").sum() or len(df)
+    loan_amount = safe_col(df, "loan_amount").sum()
+    default_rate = safe_col(df, "default_rate").mean()
+    avg_transaction = round(loan_amount / transactions, 2) if transactions > 0 else 0
+    
+    b = BENCHMARKS["fintech"]
+    return {
+        "industry": "fintech",
+        "metrics": {
+            "Total Transactions": f"{int(transactions):,}",
+            "Total Loan Amount": f"₹{loan_amount:,.0f}",
+            "Avg Transaction Value": f"₹{avg_transaction:,.0f}",
+            "Default Rate": f"{round(default_rate, 2)}%"
+        },
+        "chart_data": [
+            {"name": "Default Rate %", "Yours": round(default_rate, 2), "India Avg": 8.5},
+            {"name": "Avg Transaction (₹)", "Yours": avg_transaction, "India Avg": b["avg_transaction_value"]},
+        ],
+        "predictions": [],
+        "insights": [],
+        "source": b["source"]
+    }
+
+# ============================================
+# 5. STOCK ANALYZER (Existing)
+# ============================================
+def analyze_stock(df):
+    df = fuzzy_map_columns(df)
+    close = safe_col(df, "close")
+    if close.sum() == 0:
+        close = pd.Series([random.uniform(100, 500) for _ in range(len(df))])
+    returns = close.pct_change().dropna()
+    annual_return = round(float(returns.mean()) * 252 * 100, 2)
+    volatility = round(float(returns.std()) * np.sqrt(252) * 100, 2)
+    sharpe = round(annual_return / volatility, 2) if volatility > 0 else 0
+    b = BENCHMARKS["stock"]
+    return {
+        "industry": "stock",
+        "metrics": {"Annual Return": f"{annual_return}%", "Volatility": f"{volatility}%", "Sharpe Ratio": sharpe},
+        "chart_data": [],
+        "predictions": [],
+        "insights": [],
+        "source": b["source"]
+    }
+
+# ============================================
+# 6. HR ANALYZER
+# ============================================
+def analyze_hr(df):
+    df = fuzzy_map_columns(df)
+    attrition = round(safe_col(df, "attrition").mean(), 1)
+    cost_hire = round(safe_col(df, "cost_per_hire").mean(), 0)
+    b = BENCHMARKS["hr"]
+    return {
+        "industry": "hr",
+        "metrics": {"Attrition Rate": f"{attrition}%", "Cost per Hire": f"₹{cost_hire:,.0f}"},
+        "chart_data": [],
+        "predictions": [],
+        "insights": [],
+        "source": b["source"]
+    }
+
+# ============================================
+# 7. SALES ANALYZER
+# ============================================
+def analyze_sales(df):
+    df = fuzzy_map_columns(df)
+    avg_deal = round(safe_col(df, "deal_size").mean(), 0)
+    b = BENCHMARKS["sales"]
+    return {
+        "industry": "sales",
+        "metrics": {"Avg Deal Size": f"₹{avg_deal:,.0f}"},
+        "chart_data": [],
+        "predictions": [],
+        "insights": [],
+        "source": b["source"]
+    }
+
+# ============================================
+# 8. ECOMMERCE ANALYZER
+# ============================================
+def analyze_ecommerce(df):
+    df = fuzzy_map_columns(df)
+    aov = round(safe_col(df, "order_value").mean(), 2)
+    b = BENCHMARKS["ecommerce"]
+    return {
+        "industry": "ecommerce",
+        "metrics": {"Avg Order Value": f"₹{aov:,.0f}"},
+        "chart_data": [],
+        "predictions": [],
+        "insights": [],
+        "source": b["source"]
+    }
+
+# ============================================
+# 9. GOOGLE TRENDS DATA (Live)
+# ============================================
+@app.get("/trends/{keyword}")
+async def get_google_trends(keyword: str):
+    """Get Google Trends data for any keyword (cached for 5 minutes)"""
+    cache_key = f"trends_{keyword}"
+    
+    # Check cache first
+    if cache_key in cache:
+        return cache[cache_key]
+    
+    try:
+        # Note: This uses pytrends - requires pip install pytrends
+        # For now, returns mock data with caching structure
+        result = {
+            "keyword": keyword,
+            "interest_over_time": [random.randint(20, 100) for _ in range(90)],
+            "current_interest": random.randint(30, 90),
+            "source": "Google Trends (Mock - install pytrends for live data)",
+            "cached_until": (datetime.now() + timedelta(minutes=5)).isoformat()
+        }
+        
+        # Store in cache
+        cache[cache_key] = result
+        return result
+    except Exception as e:
+        return {"error": str(e), "keyword": keyword}
+
+# ============================================
+# 10. LIVE STOCK DATA (Existing - with caching)
+# ============================================
+@app.get("/stock/{symbol}")
+async def get_live_stock(symbol: str):
+    """Fetch live stock data from Yahoo Finance (cached for 5 minutes)"""
+    cache_key = f"stock_{symbol.upper()}"
+    
+    # Check cache first
+    if cache_key in cache:
+        return cache[cache_key]
+    
+    try:
+        import yfinance as yf
+        
+        # Format symbol for NSE/BSE
+        original_symbol = symbol.upper()
+        if not original_symbol.endswith(".NS") and not original_symbol.endswith(".BO"):
+            nse_symbol = original_symbol + ".NS"
+            ticker = yf.Ticker(nse_symbol)
+            info = ticker.info
+            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+            if current_price == 0:
+                bse_symbol = original_symbol + ".BO"
+                ticker = yf.Ticker(bse_symbol)
+                info = ticker.info
+                current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+        else:
+            ticker = yf.Ticker(original_symbol)
+            info = ticker.info
+            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+        
+        hist = ticker.history(period="3mo")
+        metrics = {}
+        prediction = None
+        
+        if not hist.empty and len(hist) > 5:
+            hist['Return'] = hist['Close'].pct_change()
+            avg_return = hist['Return'].mean() * 100
+            volatility = hist['Return'].std() * 100
+            metrics = {
+                "avg_daily_return": f"{round(avg_return, 2)}%",
+                "volatility": f"{round(volatility, 2)}%",
+                "sharpe_ratio": round(avg_return / volatility, 2) if volatility > 0 else 0
+            }
+            close_values = hist['Close'].values.tolist()
+            if len(close_values) >= 10:
+                x = np.array(range(len(close_values))).reshape(-1, 1)
+                y = np.array(close_values)
+                model = LinearRegression()
+                model.fit(x, y)
+                future_x = np.array(range(len(close_values), len(close_values) + 30)).reshape(-1, 1)
+                future_prices = model.predict(future_x)
+                prediction = {
+                    "next_30_days": [round(float(p), 2) for p in future_prices[:5]],
+                    "trend": "increasing" if model.coef_[0] > 0 else "decreasing",
+                    "confidence": round(float(model.score(x, y)) * 100, 1)
+                }
+        
+        company_name = info.get("longName") or info.get("shortName") or original_symbol.replace(".NS", "").replace(".BO", "")
+        
+        result = {
+            "symbol": original_symbol,
+            "company_name": company_name,
+            "current_price": current_price,
+            "day_change": info.get("regularMarketChange", 0),
+            "day_change_percent": info.get("regularMarketChangePercent", 0),
+            "volume": info.get("volume", 0),
+            "market_cap": info.get("marketCap", 0),
+            "pe_ratio": info.get("trailingPE", 0),
+            "week_52_high": info.get("fiftyTwoWeekHigh", 0),
+            "week_52_low": info.get("fiftyTwoWeekLow", 0),
+            **metrics,
+            "prediction": prediction,
+            "cached_until": (datetime.now() + timedelta(minutes=5)).isoformat()
+        }
+        
+        # Store in cache
+        cache[cache_key] = result
+        return result
+    except ImportError:
+        return {"error": "yfinance not installed. Run: pip install yfinance", "symbol": symbol.upper()}
+    except Exception as e:
+        return {"error": str(e), "symbol": symbol.upper()}
+
+# ============================================
+# SAMPLE DATA GENERATORS
+# ============================================
 def sample_marketing():
     campaigns = ["Google Ads", "Meta Ads", "Instagram", "YouTube", "Organic"]
     rows = []
@@ -231,6 +524,39 @@ def sample_marketing():
                      "active_users": int(installs * random.uniform(0.6, 0.9))})
     return pd.DataFrame(rows)
 
+def sample_research():
+    rows = []
+    for i in range(10):
+        rows.append({
+            "paper_id": i+1,
+            "papers": random.randint(5, 50),
+            "citations": random.randint(10, 500),
+            "impact_factor": round(random.uniform(1.0, 5.0), 2)
+        })
+    return pd.DataFrame(rows)
+
+def sample_medical():
+    rows = []
+    for i in range(30):
+        rows.append({
+            "patient_id": i+1,
+            "patients": 1,
+            "readmissions": random.choice([0, 0, 0, 1]),
+            "treatment_cost": random.randint(10000, 50000)
+        })
+    return pd.DataFrame(rows)
+
+def sample_fintech():
+    rows = []
+    for i in range(50):
+        rows.append({
+            "transaction_id": i+1,
+            "transactions": 1,
+            "loan_amount": random.randint(5000, 100000),
+            "default_rate": random.uniform(0, 15)
+        })
+    return pd.DataFrame(rows)
+
 def sample_stock():
     rows = []
     price = random.uniform(18000, 22000)
@@ -239,9 +565,6 @@ def sample_stock():
         price = price * (1 + change)
         rows.append({
             "date": (datetime.now() - timedelta(days=30-i)).strftime("%Y-%m-%d"),
-            "open": round(price * random.uniform(0.99, 1.01), 2),
-            "high": round(price * random.uniform(1.005, 1.02), 2),
-            "low": round(price * random.uniform(0.98, 0.995), 2),
             "close": round(price, 2),
             "volume": random.randint(5000000, 20000000)
         })
@@ -257,7 +580,6 @@ def sample_hr():
             "employees": emp,
             "attrition": round(random.uniform(8, 30), 1),
             "cost_per_hire": random.randint(30000, 80000),
-            "time_to_hire": random.randint(20, 60),
             "engagement_score": random.randint(50, 90)
         })
     return pd.DataFrame(rows)
@@ -267,24 +589,18 @@ def sample_sales():
     rows = []
     for i in range(20):
         rows.append({
-            "deal_id": i+1,
             "deal_size": random.randint(20000, 200000),
             "status": random.choice(statuses),
-            "sales_cycle_days": random.randint(15, 90),
-            "region": random.choice(["North", "South", "East", "West"])
+            "sales_cycle_days": random.randint(15, 90)
         })
     return pd.DataFrame(rows)
 
 def sample_ecommerce():
     rows = []
     for i in range(30):
-        orders = random.randint(50, 300)
         rows.append({
-            "date": (datetime.now() - timedelta(days=30-i)).strftime("%Y-%m-%d"),
             "order_value": round(random.uniform(500, 3000), 2),
-            "cart_abandoned": random.randint(10, 100),
-            "returned": random.randint(2, 20),
-            "converted": orders
+            "converted": random.randint(50, 300)
         })
     return pd.DataFrame(rows)
 
@@ -294,412 +610,39 @@ SAMPLE_GENERATORS = {
     "hr": sample_hr,
     "sales": sample_sales,
     "ecommerce": sample_ecommerce,
+    "research": sample_research,
+    "medical": sample_medical,
+    "fintech": sample_fintech,
 }
 
-# ─── Industry Analyzers ──────────────────────────────────────────────────────
-def analyze_marketing(df):
-    df = fuzzy_map_columns(df)
-    spend = safe_col(df, "spend").sum()
-    installs = safe_col(df, "installs").sum()
-    revenue = safe_col(df, "revenue").sum()
-    active = safe_col(df, "active_users").sum() or installs * 0.7
-
-    cac = round(spend / installs, 2) if installs > 0 else 0
-    ltv = round(revenue / active, 2) if active > 0 else 0
-    roi = round(((revenue - spend) / spend) * 100, 2) if spend > 0 else 0
-    ctr = round(random.uniform(1.5, 3.5), 2)
-    ltv_cac = round(ltv / cac, 2) if cac > 0 else 0
-
-    b = BENCHMARKS["marketing"]
-    spend_vals = safe_col(df, "spend").tolist()
-    rev_forecast = predict_trend(spend_vals)
-    predictions = []
-    if rev_forecast:
-        predictions.append({
-            "metric": "Revenue Next 3 Months",
-            "values": [f"₹{v:,.0f}" for v in rev_forecast["predictions"]],
-            "trend": rev_forecast["trend"],
-            "direction": "↑" if rev_forecast["trend"] == "increasing" else "↓",
-            "alert": "Revenue momentum is positive — scale your top channel." if rev_forecast["trend"] == "increasing" else "Revenue is declining — audit underperforming campaigns.",
-            "confidence": rev_forecast["confidence"]
-        })
-
-    metrics = {"Total Spend": f"₹{spend:,.0f}", "Total Installs": f"{int(installs):,}",
-               "Total Revenue": f"₹{revenue:,.0f}", "CAC": f"₹{cac}",
-               "LTV": f"₹{ltv}", "ROI": f"{roi}%", "CTR": f"{ctr}%", "LTV:CAC": f"{ltv_cac}x"}
-
-    rule_insights = []
-    if cac < b["avg_cac"]:
-        rule_insights.append({"status": "excellent", "message": f"CAC ₹{cac} is {round((b['avg_cac']-cac)/b['avg_cac']*100)}% below India average — efficient acquisition."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"CAC ₹{cac} is {round((cac-b['avg_cac'])/b['avg_cac']*100)}% above India average — reduce ad waste."})
-    if ltv > b["avg_ltv"]:
-        rule_insights.append({"status": "excellent", "message": f"LTV ₹{ltv} beats India avg ₹{b['avg_ltv']} — strong retention."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"LTV ₹{ltv} is below India avg ₹{b['avg_ltv']} — improve onboarding."})
-    if roi > b["avg_roi"]:
-        rule_insights.append({"status": "excellent", "message": f"ROI {roi}% beats India avg {b['avg_roi']}% — healthy returns."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"ROI {roi}% is below India avg {b['avg_roi']}% — cut lowest-performing channel."})
-
-    ai_insights = get_ai_insights({"CAC": f"₹{cac}", "LTV": f"₹{ltv}", "ROI": f"{roi}%"}, "marketing")
-
-    return {
-        "industry": "marketing", "metrics": metrics,
-        "chart_data": [
-            {"name": "CAC (₹)", "Yours": cac, "India Avg": b["avg_cac"]},
-            {"name": "LTV (₹)", "Yours": ltv, "India Avg": b["avg_ltv"]},
-            {"name": "ROI (%)", "Yours": roi, "India Avg": b["avg_roi"]},
-        ],
-        "predictions": predictions,
-        "insights": rule_insights,
-        "ai_insights": ai_insights,
-        "source": b["source"]
-    }
-
-def analyze_stock(df):
-    df = fuzzy_map_columns(df)
-    close = safe_col(df, "close")
-    volume = safe_col(df, "volume")
-
-    if close.sum() == 0:
-        close = pd.Series([random.uniform(100, 500) for _ in range(len(df))])
-
-    returns = close.pct_change().dropna()
-    annual_return = round(float(returns.mean()) * 252 * 100, 2)
-    volatility = round(float(returns.std()) * np.sqrt(252) * 100, 2)
-    sharpe = round(annual_return / volatility, 2) if volatility > 0 else 0
-    avg_volume = int(volume.mean()) if volume.sum() > 0 else 0
-    total_return = round(((close.iloc[-1] - close.iloc[0]) / close.iloc[0]) * 100, 2) if len(close) > 1 else 0
-    max_dd = round(float((close / close.cummax() - 1).min()) * 100, 2)
-
-    b = BENCHMARKS["stock"]
-    forecast = predict_trend(close.tolist())
-    predictions = []
-    if forecast:
-        predictions.append({
-            "metric": "Price Forecast (3 Months)",
-            "values": [f"₹{v:,.2f}" for v in forecast["predictions"]],
-            "trend": forecast["trend"],
-            "direction": "↑" if forecast["trend"] == "increasing" else "↓",
-            "alert": "Price trending up — consider holding or pyramiding." if forecast["trend"] == "increasing" else "Price declining — review stop losses.",
-            "confidence": forecast["confidence"]
-        })
-
-    metrics = {"Annual Return": f"{annual_return}%", "Volatility": f"{volatility}%",
-               "Sharpe Ratio": f"{sharpe}", "Total Return": f"{total_return}%",
-               "Avg Volume": f"{avg_volume:,}", "Max Drawdown": f"{max_dd}%"}
-
-    rule_insights = []
-    if annual_return > b["avg_annual_return"]:
-        rule_insights.append({"status": "excellent", "message": f"Returns {annual_return}% beat NSE avg {b['avg_annual_return']}%."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Returns {annual_return}% lag NSE avg {b['avg_annual_return']}% — review strategy."})
-    if volatility < b["avg_volatility"]:
-        rule_insights.append({"status": "excellent", "message": f"Volatility {volatility}% is lower than market avg — stable portfolio."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"High volatility {volatility}% — consider diversification."})
-    if sharpe > b["avg_sharpe"]:
-        rule_insights.append({"status": "excellent", "message": f"Sharpe {sharpe} is above India avg {b['avg_sharpe']} — good risk-adjusted returns."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Sharpe {sharpe} is below India avg — risk is not adequately rewarded."})
-
-    ai_insights = get_ai_insights(metrics, "stock market")
-
-    return {
-        "industry": "stock", "metrics": metrics,
-        "chart_data": [
-            {"name": "Annual Return (%)", "Yours": annual_return, "India Avg": b["avg_annual_return"]},
-            {"name": "Volatility (%)", "Yours": volatility, "India Avg": b["avg_volatility"]},
-            {"name": "Sharpe Ratio", "Yours": sharpe, "India Avg": b["avg_sharpe"]},
-        ],
-        "predictions": predictions,
-        "insights": rule_insights,
-        "ai_insights": ai_insights,
-        "source": b["source"]
-    }
-
-def analyze_hr(df):
-    df = fuzzy_map_columns(df)
-    attrition = safe_col(df, "attrition").mean()
-    cost_hire = safe_col(df, "cost_per_hire").mean()
-    time_hire = safe_col(df, "time_to_hire").mean()
-    engagement = safe_col(df, "engagement_score").mean()
-    employees = safe_col(df, "employees").sum() or 100
-
-    attrition = round(float(attrition), 1)
-    cost_hire = round(float(cost_hire), 0)
-    time_hire = round(float(time_hire), 1)
-    engagement = round(float(engagement), 1)
-
-    b = BENCHMARKS["hr"]
-    metrics = {"Avg Attrition": f"{attrition}%", "Cost per Hire": f"₹{cost_hire:,.0f}",
-               "Time to Hire": f"{time_hire} days", "Engagement Score": f"{engagement}/100",
-               "Total Headcount": f"{int(employees):,}"}
-
-    rule_insights = []
-    if attrition < b["avg_attrition"]:
-        rule_insights.append({"status": "excellent", "message": f"Attrition {attrition}% is below India avg {b['avg_attrition']}% — good retention."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Attrition {attrition}% exceeds India avg {b['avg_attrition']}% — address exit reasons."})
-    if cost_hire < b["avg_cost_per_hire"]:
-        rule_insights.append({"status": "excellent", "message": f"Cost per hire ₹{cost_hire:,.0f} is efficient vs India avg ₹{b['avg_cost_per_hire']:,.0f}."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Cost per hire ₹{cost_hire:,.0f} is high — explore employee referral programmes."})
-    if engagement > b["avg_engagement"]:
-        rule_insights.append({"status": "excellent", "message": f"Engagement {engagement} beats India avg {b['avg_engagement']} — strong culture."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Engagement {engagement} is below India avg {b['avg_engagement']} — invest in L&D."})
-
-    ai_insights = get_ai_insights(metrics, "HR")
-
-    return {
-        "industry": "hr", "metrics": metrics,
-        "chart_data": [
-            {"name": "Attrition (%)", "Yours": attrition, "India Avg": b["avg_attrition"]},
-            {"name": "Cost/Hire (₹K)", "Yours": round(cost_hire/1000, 1), "India Avg": round(b["avg_cost_per_hire"]/1000, 1)},
-            {"name": "Engagement", "Yours": engagement, "India Avg": b["avg_engagement"]},
-        ],
-        "predictions": [],
-        "insights": rule_insights,
-        "ai_insights": ai_insights,
-        "source": b["source"]
-    }
-
-def analyze_sales(df):
-    df = fuzzy_map_columns(df)
-    deal_size = safe_col(df, "deal_size")
-    cycle_days = safe_col(df, "sales_cycle_days")
-
-    avg_deal = round(float(deal_size.mean()), 0)
-    avg_cycle = round(float(cycle_days.mean()), 1)
-
-    win_rate = 30.0
-    if "status" in df.columns:
-        won = df["status"].str.lower().isin(["won", "closed won", "win", "closed", "success"]).sum()
-        total = len(df)
-        win_rate = round((won / total) * 100, 1) if total > 0 else 30.0
-
-    total_pipeline = round(float(deal_size.sum()), 0)
-    b = BENCHMARKS["sales"]
-
-    forecast = predict_trend(deal_size.tolist())
-    predictions = []
-    if forecast:
-        predictions.append({
-            "metric": "Deal Size Forecast",
-            "values": [f"₹{v:,.0f}" for v in forecast["predictions"]],
-            "trend": forecast["trend"],
-            "direction": "↑" if forecast["trend"] == "increasing" else "↓",
-            "alert": "Deal sizes growing — push for enterprise accounts." if forecast["trend"] == "increasing" else "Deal sizes shrinking — re-qualify pipeline.",
-            "confidence": forecast["confidence"]
-        })
-
-    metrics = {"Avg Deal Size": f"₹{avg_deal:,.0f}", "Win Rate": f"{win_rate}%",
-               "Avg Sales Cycle": f"{avg_cycle} days", "Total Pipeline": f"₹{total_pipeline:,.0f}"}
-
-    rule_insights = []
-    if avg_deal > b["avg_deal_size"]:
-        rule_insights.append({"status": "excellent", "message": f"Avg deal ₹{avg_deal:,.0f} beats India avg ₹{b['avg_deal_size']:,.0f} — strong positioning."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Avg deal ₹{avg_deal:,.0f} is below India avg — upsell existing accounts."})
-    if win_rate > b["avg_win_rate"]:
-        rule_insights.append({"status": "excellent", "message": f"Win rate {win_rate}% exceeds India avg {b['avg_win_rate']}% — strong closing."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Win rate {win_rate}% is below India avg {b['avg_win_rate']}% — sharpen objection handling."})
-    if avg_cycle < b["avg_cycle_days"]:
-        rule_insights.append({"status": "excellent", "message": f"Sales cycle {avg_cycle} days is faster than India avg {b['avg_cycle_days']} days."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Sales cycle {avg_cycle} days is longer than India avg — add urgency triggers."})
-
-    ai_insights = get_ai_insights(metrics, "sales")
-
-    return {
-        "industry": "sales", "metrics": metrics,
-        "chart_data": [
-            {"name": "Deal Size (₹K)", "Yours": round(avg_deal/1000, 1), "India Avg": round(b["avg_deal_size"]/1000, 1)},
-            {"name": "Win Rate (%)", "Yours": win_rate, "India Avg": b["avg_win_rate"]},
-            {"name": "Cycle (days)", "Yours": avg_cycle, "India Avg": b["avg_cycle_days"]},
-        ],
-        "predictions": predictions,
-        "insights": rule_insights,
-        "ai_insights": ai_insights,
-        "source": b["source"]
-    }
-
-def analyze_ecommerce(df):
-    df = fuzzy_map_columns(df)
-    order_value = safe_col(df, "order_value")
-    cart_aband = safe_col(df, "cart_abandoned")
-    returned = safe_col(df, "returned")
-    converted = safe_col(df, "converted")
-
-    aov = round(float(order_value.mean()), 2)
-    total_orders = int(converted.sum())
-    total_abandoned = int(cart_aband.sum())
-    total_returned = int(returned.sum())
-    cart_rate = round((total_abandoned / (total_abandoned + total_orders)) * 100, 1) if (total_abandoned + total_orders) > 0 else 0
-    return_rate = round((total_returned / total_orders) * 100, 1) if total_orders > 0 else 0
-    conversion = round(random.uniform(1.5, 4.5), 1)
-
-    b = BENCHMARKS["ecommerce"]
-    forecast = predict_trend(order_value.tolist())
-    predictions = []
-    if forecast:
-        predictions.append({
-            "metric": "AOV Forecast",
-            "values": [f"₹{v:,.0f}" for v in forecast["predictions"]],
-            "trend": forecast["trend"],
-            "direction": "↑" if forecast["trend"] == "increasing" else "↓",
-            "alert": "AOV growing — push bundles and cross-sells." if forecast["trend"] == "increasing" else "AOV declining — review pricing strategy.",
-            "confidence": forecast["confidence"]
-        })
-
-    metrics = {"Avg Order Value": f"₹{aov:,.2f}", "Total Orders": f"{total_orders:,}",
-               "Cart Abandonment": f"{cart_rate}%", "Return Rate": f"{return_rate}%",
-               "Conversion Rate": f"{conversion}%"}
-
-    rule_insights = []
-    if aov > b["avg_aov"]:
-        rule_insights.append({"status": "excellent", "message": f"AOV ₹{aov:,.0f} beats India avg ₹{b['avg_aov']:,.0f} — strong basket size."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"AOV ₹{aov:,.0f} is below India avg ₹{b['avg_aov']:,.0f} — add product bundles."})
-    if cart_rate < b["avg_cart_abandonment"]:
-        rule_insights.append({"status": "excellent", "message": f"Cart abandonment {cart_rate}% is below India avg {b['avg_cart_abandonment']}% — strong checkout UX."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Cart abandonment {cart_rate}% is high — try exit-intent popups or COD option."})
-    if return_rate < b["avg_return_rate"]:
-        rule_insights.append({"status": "excellent", "message": f"Return rate {return_rate}% is below India avg {b['avg_return_rate']}% — product quality is solid."})
-    else:
-        rule_insights.append({"status": "warning", "message": f"Return rate {return_rate}% is high — review size guides and product descriptions."})
-
-    ai_insights = get_ai_insights(metrics, "e-commerce")
-
-    return {
-        "industry": "ecommerce", "metrics": metrics,
-        "chart_data": [
-            {"name": "AOV (₹)", "Yours": aov, "India Avg": b["avg_aov"]},
-            {"name": "Cart Abnd (%)", "Yours": cart_rate, "India Avg": b["avg_cart_abandonment"]},
-            {"name": "Return Rate (%)", "Yours": return_rate, "India Avg": b["avg_return_rate"]},
-        ],
-        "predictions": predictions,
-        "insights": rule_insights,
-        "ai_insights": ai_insights,
-        "source": b["source"]
-    }
-
-# ─── Routes ───────────────────────────────────────────────────────────────────
+# ============================================
+# ANALYZERS DICTIONARY
+# ============================================
 ANALYZERS = {
     "marketing": analyze_marketing,
     "stock": analyze_stock,
     "hr": analyze_hr,
     "sales": analyze_sales,
     "ecommerce": analyze_ecommerce,
+    "research": analyze_research,
+    "medical": analyze_medical,
+    "fintech": analyze_fintech,
 }
 
+# ============================================
+# ROUTES
+# ============================================
 @app.get("/")
 def home():
-    return {"message": "PathViz backend is running", "groq_enabled": bool(GROQ_API_KEY)}
+    return {"message": "PathViz backend is running", "groq_enabled": bool(GROQ_API_KEY), "cache_size": len(cache)}
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "groq": bool(GROQ_API_KEY), "supabase": bool(SUPABASE_KEY)}
+    return {"status": "ok", "groq": bool(GROQ_API_KEY), "supabase": bool(SUPABASE_KEY), "cache_size": len(cache)}
 
-# ============================================
-# LIVE STOCK DATA ENDPOINT
-# ============================================
-
-@app.get("/stock/{symbol}")
-async def get_live_stock(symbol: str):
-    """
-    Fetch live stock data from Yahoo Finance.
-    Supports NSE symbols (add .NS suffix) and BSE symbols (add .BO suffix)
-    Example: /stock/RELIANCE.NS, /stock/TCS.NS, /stock/HDFCBANK.NS
-    """
-    try:
-        import yfinance as yf
-        
-        # Format symbol for NSE/BSE
-        original_symbol = symbol.upper()
-        
-        # If user didn't specify exchange, try both NSE and BSE
-        if not original_symbol.endswith(".NS") and not original_symbol.endswith(".BO"):
-            # Try NSE first
-            nse_symbol = original_symbol + ".NS"
-            ticker = yf.Ticker(nse_symbol)
-            info = ticker.info
-            
-            # Check if we got valid data
-            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-            
-            # If no data from NSE, try BSE
-            if current_price == 0:
-                bse_symbol = original_symbol + ".BO"
-                ticker = yf.Ticker(bse_symbol)
-                info = ticker.info
-                current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-        else:
-            ticker = yf.Ticker(original_symbol)
-            info = ticker.info
-            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-        
-        # Get 3 months of history for predictions
-        hist = ticker.history(period="3mo")
-        
-        # Calculate basic metrics if history exists
-        metrics = {}
-        prediction = None
-        
-        if not hist.empty and len(hist) > 5:
-            hist['Return'] = hist['Close'].pct_change()
-            avg_return = hist['Return'].mean() * 100
-            volatility = hist['Return'].std() * 100
-            metrics = {
-                "avg_daily_return": f"{round(avg_return, 2)}%",
-                "volatility": f"{round(volatility, 2)}%",
-                "sharpe_ratio": round(avg_return / volatility, 2) if volatility > 0 else 0
-            }
-            
-            # Predict next 30 days using linear regression
-            close_values = hist['Close'].values.tolist()
-            if len(close_values) >= 10:
-                x = np.array(range(len(close_values))).reshape(-1, 1)
-                y = np.array(close_values)
-                model = LinearRegression()
-                model.fit(x, y)
-                future_x = np.array(range(len(close_values), len(close_values) + 30)).reshape(-1, 1)
-                future_prices = model.predict(future_x)
-                prediction = {
-                    "next_30_days": [round(float(p), 2) for p in future_prices[:5]],
-                    "trend": "increasing" if model.coef_[0] > 0 else "decreasing",
-                    "confidence": round(float(model.score(x, y)) * 100, 1)
-                }
-        
-        # Get company name
-        company_name = info.get("longName") or info.get("shortName") or original_symbol.replace(".NS", "").replace(".BO", "")
-        
-        return {
-            "symbol": original_symbol,
-            "company_name": company_name,
-            "current_price": current_price,
-            "day_change": info.get("regularMarketChange", 0),
-            "day_change_percent": info.get("regularMarketChangePercent", 0),
-            "volume": info.get("volume", 0),
-            "market_cap": info.get("marketCap", 0),
-            "pe_ratio": info.get("trailingPE", 0),
-            "week_52_high": info.get("fiftyTwoWeekHigh", 0),
-            "week_52_low": info.get("fiftyTwoWeekLow", 0),
-            **metrics,
-            "prediction": prediction
-        }
-    except ImportError:
-        return {"error": "yfinance not installed. Run: pip install yfinance", "symbol": symbol.upper()}
-    except Exception as e:
-        return {"error": str(e), "symbol": symbol.upper()}
-
-# ============================================
-# MAIN ANALYZE ENDPOINT
-# ============================================
+@app.get("/cache/stats")
+def cache_stats():
+    return {"cache_size": len(cache), "max_size": cache.maxsize, "ttl_seconds": 300}
 
 @app.post("/analyze")
 async def analyze_csv(
@@ -729,6 +672,12 @@ async def analyze_csv(
             return {"error": "File loaded but contains no usable data rows."}
 
         result = analyzer(df)
+        
+        # Add AI insights if available
+        ai_insights = get_ai_insights(result.get("metrics", {}), industry)
+        if ai_insights:
+            result["insights"] = ai_insights
+            result["ai_used"] = True
 
         save_to_supabase(
             industry=industry,
@@ -745,9 +694,8 @@ async def analyze_csv(
         return {"error": f"Analysis failed: {str(e)}"}
 
 # ============================================
-# RUN THE SERVER (MUST BE AT THE VERY BOTTOM)
+# RUN THE SERVER
 # ============================================
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
