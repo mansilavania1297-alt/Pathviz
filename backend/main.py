@@ -40,7 +40,12 @@ def save_to_supabase(industry: str, metrics: dict, insights: list, predictions: 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://pathviz-app.vercel.app",
+        "https://pathviz.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
