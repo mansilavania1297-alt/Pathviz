@@ -44,7 +44,8 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
         "https://pathviz-app.vercel.app",
-        "https://pathviz.vercel.app"
+        "https://pathviz.vercel.app",
+        "https://pathviz-production.up.railway.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
