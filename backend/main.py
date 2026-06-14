@@ -10,6 +10,7 @@ import random
 import chardet
 from datetime import datetime, timedelta
 from sklearn.linear_model import LinearRegression
+import re
 
 load_dotenv()
 
@@ -20,14 +21,13 @@ try:
     CACHE_AVAILABLE = True
     print("✅ cachetools loaded — TTL cache active (5 min)")
 except ImportError:
-    # Simple dict fallback — no TTL, but won't crash
     cache = {}
     CACHE_AVAILABLE = False
-    print("⚠️  cachetools not installed — using simple dict cache (no TTL). Run: pip install cachetools")
+    print("⚠️  cachetools not installed — using simple dict cache (no TTL).")
 
 # ─── Supabase ────────────────────────────────────────────────────────────────
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://fydfhzulozwjncbnmmwa.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5ZGZoenVsb3p3am5jYm5tbXdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4NDY3NTcsImV4cCI6MjA5NTQyMjc1N30.6JCeGDkmhMWBph02qK3_EgxjBjHfE43_MsXlrCTmLqo")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -69,87 +69,211 @@ BENCHMARKS = {
     "fintech":    {"avg_customer_acquisition": 450.0, "avg_transaction_value": 2500.0, "avg_apr": 12.0, "source": "RBI FinTech Report 2024"},
 }
 
-# ─── Column Fuzzy Mapper ─────────────────────────────────────────────────────
+# ─── Column Aliases — EXPANDED with many more variants ───────────────────────
 COLUMN_ALIASES = {
-    "spend":          ["spend", "cost", "ad_spend", "budget", "expense", "marketing_spend"],
-    "installs":       ["installs", "downloads", "acquisitions", "new_users", "signups"],
-    "revenue":        ["revenue", "income", "sales", "total_revenue", "earnings", "gmv"],
-    "active_users":   ["active_users", "activeusers", "dau", "mau", "users", "retention"],
-    "close":          ["close", "closing_price", "price", "adj_close"],
-    "volume":         ["volume", "vol", "trade_volume", "shares_traded"],
-    "date":           ["date", "time", "timestamp", "trading_date", "day"],
-    "employees":      ["employees", "headcount", "total_employees", "staff", "workforce"],
-    "attrition":      ["attrition", "attrition_rate", "turnover", "churn"],
-    "cost_per_hire":  ["cost_per_hire", "hiring_cost", "recruitment_cost"],
-    "time_to_hire":   ["time_to_hire", "days_to_hire", "hiring_days", "tat"],
-    "engagement_score": ["engagement_score", "engagement", "esat"],
-    "deal_size":      ["deal_size", "deal_value", "contract_value", "deal_amount"],
-    "status":         ["status", "stage", "outcome", "result", "deal_status"],
-    "sales_cycle_days": ["sales_cycle_days", "cycle_days", "days_to_close"],
-    "order_value":    ["order_value", "aov", "basket_size", "cart_value"],
-    "cart_abandoned": ["cart_abandoned", "abandoned", "abandoned_carts"],
-    "returned":       ["returned", "returns", "refunded", "return_rate"],
-    "converted":      ["converted", "conversions", "purchases", "completed_orders"],
-    "papers":         ["papers", "publications", "articles", "documents"],
-    "citations":      ["citations", "total_citations", "cites", "ref_count"],
-    "impact_factor":  ["impact_factor", "if", "journal_if", "jif"],
-    "patients":       ["patients", "total_patients", "cases", "admissions"],
-    "readmissions":   ["readmissions", "readmission_rate", "rehospitalizations"],
-    "treatment_cost": ["treatment_cost", "cost_per_treatment", "procedure_cost", "avg_cost"],
-    "transactions":   ["transactions", "txn_count", "total_transactions", "payments"],
-    "loan_amount":    ["loan_amount", "loan_value", "disbursement", "principal"],
-    "default_rate":   ["default_rate", "defaults", "delinquency", "npd_rate"],
+    # Marketing
+    "spend":            ["spend", "cost", "ad_spend", "budget", "expense", "marketing_spend",
+                         "total_spend", "adspend", "costs", "ad spend", "marketing spend",
+                         "advertising_cost", "media_spend", "campaign_spend", "investment"],
+    "installs":         ["installs", "downloads", "acquisitions", "new_users", "signups",
+                         "new users", "sign_ups", "app_installs", "total_installs",
+                         "users_acquired", "acquired_users", "conversions", "leads"],
+    "revenue":          ["revenue", "income", "sales", "total_revenue", "earnings", "gmv",
+                         "total_sales", "gross_revenue", "net_revenue", "total_income",
+                         "sales_revenue", "turnover", "receipts", "amount"],
+    "active_users":     ["active_users", "activeusers", "dau", "mau", "users", "retention",
+                         "monthly_active", "daily_active", "retained_users", "active"],
+    # Stock
+    "close":            ["close", "closing_price", "price", "adj_close", "adjusted_close",
+                         "close_price", "closing", "last_price", "last", "settlement_price",
+                         "end_price", "stock_price", "share_price"],
+    "volume":           ["volume", "vol", "trade_volume", "shares_traded", "qty",
+                         "quantity", "shares", "no_of_shares", "traded_quantity"],
+    "date":             ["date", "time", "timestamp", "trading_date", "day", "trade_date",
+                         "datetime", "period", "week", "month", "year", "quarter"],
+    # HR
+    "employees":        ["employees", "headcount", "total_employees", "staff", "workforce",
+                         "total_staff", "no_of_employees", "employee_count", "people",
+                         "team_size", "ftes", "fte"],
+    "attrition":        ["attrition", "attrition_rate", "turnover", "churn", "turnover_rate",
+                         "employee_churn", "exit_rate", "attrition_%", "attrition_percent"],
+    "cost_per_hire":    ["cost_per_hire", "hiring_cost", "recruitment_cost", "cost_to_hire",
+                         "hire_cost", "recruiting_cost", "recruitment_expense"],
+    "time_to_hire":     ["time_to_hire", "days_to_hire", "hiring_days", "tat",
+                         "days_to_fill", "hiring_time", "recruitment_days", "ttf"],
+    "engagement_score": ["engagement_score", "engagement", "esat", "employee_satisfaction",
+                         "satisfaction_score", "enps", "morale_score", "happiness"],
+    # Sales
+    "deal_size":        ["deal_size", "deal_value", "contract_value", "deal_amount",
+                         "opportunity_value", "sale_amount", "order_amount", "value",
+                         "deal amount", "contract size", "revenue_per_deal"],
+    "status":           ["status", "stage", "outcome", "result", "deal_status",
+                         "deal_stage", "pipeline_stage", "close_status", "won_lost"],
+    "sales_cycle_days": ["sales_cycle_days", "cycle_days", "days_to_close", "cycle_length",
+                         "sales_cycle", "time_to_close", "close_days", "deal_duration"],
+    # Ecommerce
+    "order_value":      ["order_value", "aov", "basket_size", "cart_value", "order_amount",
+                         "purchase_value", "transaction_amount", "sale_value",
+                         "order total", "purchase amount"],
+    "cart_abandoned":   ["cart_abandoned", "abandoned", "abandoned_carts", "cart_abandonment",
+                         "abandoned_orders", "dropped_carts", "incomplete_orders"],
+    "returned":         ["returned", "returns", "refunded", "return_rate", "refunds",
+                         "product_returns", "order_returns", "items_returned"],
+    "converted":        ["converted", "conversions", "purchases", "completed_orders",
+                         "orders", "total_orders", "successful_orders", "bought"],
+    # Research
+    "papers":           ["papers", "publications", "articles", "documents", "works",
+                         "research_papers", "journal_articles", "num_papers", "count"],
+    "citations":        ["citations", "total_citations", "cites", "ref_count",
+                         "citation_count", "times_cited", "cited_by", "references"],
+    "impact_factor":    ["impact_factor", "if", "journal_if", "jif", "impact",
+                         "journal_impact", "if_score"],
+    # Medical
+    "patients":         ["patients", "total_patients", "cases", "admissions",
+                         "patient_count", "num_patients", "no_of_patients"],
+    "readmissions":     ["readmissions", "readmission_rate", "rehospitalizations",
+                         "readmitted", "re_admissions", "bouncebacks"],
+    "treatment_cost":   ["treatment_cost", "cost_per_treatment", "procedure_cost", "avg_cost",
+                         "treatment_expense", "care_cost", "medical_cost", "cost"],
+    # Fintech
+    "transactions":     ["transactions", "txn_count", "total_transactions", "payments",
+                         "num_transactions", "transaction_count", "no_of_txns", "txns"],
+    "loan_amount":      ["loan_amount", "loan_value", "disbursement", "principal",
+                         "loan_size", "credit_amount", "sanctioned_amount", "financed"],
+    "default_rate":     ["default_rate", "defaults", "delinquency", "npd_rate",
+                         "npa_rate", "bad_debt_rate", "default_%", "npas"],
 }
 
 
+def normalize_col_name(col: str) -> str:
+    """Aggressively normalize a column name for matching."""
+    col = str(col).lower().strip()
+    col = re.sub(r'[^a-z0-9]+', '_', col)  # replace any non-alphanumeric with _
+    col = re.sub(r'_+', '_', col).strip('_')
+    return col
+
+
 def fuzzy_map_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df.columns = (
-        df.columns.str.lower()
-        .str.strip()
-        .str.replace(" ", "_", regex=False)
-        .str.replace("-", "_", regex=False)
-    )
+    """
+    Map raw column names to canonical names using aliases.
+    Works on messy, mixed-case, space-separated, or symbol-separated headers.
+    """
+    # First pass: normalize all existing columns
+    df = df.copy()
+    df.columns = [normalize_col_name(c) for c in df.columns]
+
     rename_map = {}
+    used_canonicals = set()
+
     for canonical, aliases in COLUMN_ALIASES.items():
+        if canonical in used_canonicals:
+            continue
+        normalized_aliases = [normalize_col_name(a) for a in aliases]
         for col in df.columns:
-            if col in aliases and canonical not in rename_map.values():
+            if col in normalized_aliases and canonical not in used_canonicals:
                 rename_map[col] = canonical
+                used_canonicals.add(canonical)
                 break
+
+    # Second pass: partial/substring matching for anything not yet mapped
+    already_mapped = set(rename_map.keys())
+    for col in df.columns:
+        if col in already_mapped or col in used_canonicals:
+            continue
+        for canonical, aliases in COLUMN_ALIASES.items():
+            if canonical in used_canonicals:
+                continue
+            normalized_aliases = [normalize_col_name(a) for a in aliases]
+            for alias in normalized_aliases:
+                # substring match — col contains the alias or alias contains col
+                if (alias in col or col in alias) and len(col) > 2:
+                    rename_map[col] = canonical
+                    used_canonicals.add(canonical)
+                    break
+            if col in rename_map:
+                break
+
     return df.rename(columns=rename_map)
 
 
 def safe_col(df: pd.DataFrame, name: str, default: float = 0) -> pd.Series:
     if name in df.columns:
-        return pd.to_numeric(df[name], errors="coerce").fillna(default)
+        series = pd.to_numeric(df[name], errors="coerce").fillna(default)
+        return series
     return pd.Series([default] * len(df))
 
 
+def has_col(df: pd.DataFrame, name: str) -> bool:
+    return name in df.columns and safe_col(df, name).sum() != 0
+
+
 def read_uploaded_file(contents: bytes, filename: str = "") -> pd.DataFrame:
-    filename = filename.lower()
-    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+    """
+    Robustly read CSV or Excel files.
+    Handles: messy headers, multiple encodings, blank rows, merged cells,
+    extra whitespace, numeric headers, multi-sheet Excel, BOM markers.
+    """
+    filename_lower = filename.lower()
+
+    # ── Excel ──────────────────────────────────────────────────────────────
+    if filename_lower.endswith((".xlsx", ".xls", ".xlsm")):
         try:
-            df = pd.read_excel(io.BytesIO(contents), sheet_name=0, header=0)
-            df = df.dropna(how="all").dropna(axis=1, how="all")
-            return df
+            xl = pd.ExcelFile(io.BytesIO(contents))
+            # Try each sheet; pick the first non-empty one
+            for sheet in xl.sheet_names:
+                try:
+                    df = pd.read_excel(io.BytesIO(contents), sheet_name=sheet,
+                                       header=0, engine=None)
+                    df = df.dropna(how="all").dropna(axis=1, how="all")
+                    # Strip string values
+                    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+                    if not df.empty and len(df) > 0:
+                        return df
+                except Exception:
+                    continue
         except Exception as e:
             raise ValueError(f"Could not read Excel file: {e}")
+        raise ValueError("Excel file appears to be empty across all sheets.")
+
+    # ── CSV / TSV ───────────────────────────────────────────────────────────
     detected = chardet.detect(contents)
     encoding = detected.get("encoding") or "utf-8"
-    for enc in [encoding, "utf-8", "latin-1", "cp1252", "utf-16"]:
+
+    for enc in [encoding, "utf-8-sig", "utf-8", "latin-1", "cp1252", "utf-16"]:
         try:
             text = contents.decode(enc, errors="replace")
-            df = pd.read_csv(
-                io.StringIO(text),
-                on_bad_lines="skip",
-                skip_blank_lines=True,
-                low_memory=False,
-            )
-            df = df.dropna(how="all").dropna(axis=1, how="all")
-            if not df.empty:
-                return df
+            # Remove BOM if present
+            text = text.lstrip('\ufeff')
+
+            # Try comma, then semicolon, then tab, then pipe
+            for sep in [",", ";", "\t", "|"]:
+                try:
+                    df = pd.read_csv(
+                        io.StringIO(text),
+                        sep=sep,
+                        on_bad_lines="skip",
+                        skip_blank_lines=True,
+                        low_memory=False,
+                        thousands=",",      # handle numbers like "1,000"
+                        encoding_errors="replace",
+                    )
+                    # Need at least 2 columns and 1 data row to be valid
+                    if df.shape[1] >= 2 and len(df) >= 1:
+                        df = df.dropna(how="all").dropna(axis=1, how="all")
+                        # Strip whitespace from string columns
+                        for col in df.select_dtypes(include="object").columns:
+                            df[col] = df[col].astype(str).str.strip()
+                        if not df.empty:
+                            return df
+                except Exception:
+                    continue
         except Exception:
             continue
-    raise ValueError("Could not parse file. Please check if it's a valid CSV or Excel file.")
+
+    raise ValueError(
+        "Could not parse the file. Please ensure it's a valid CSV or Excel file. "
+        "Tip: open in Excel and re-save as CSV (UTF-8) if you're having issues."
+    )
 
 
 def predict_trend(values, periods_ahead: int = 3):
@@ -219,6 +343,8 @@ Be direct. Start each line with the number and period."""
 
 
 def save_to_supabase(industry, metrics, insights, predictions):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return
     try:
         requests.post(
             f"{SUPABASE_URL}/rest/v1/analyses",
@@ -235,7 +361,6 @@ def save_to_supabase(industry, metrics, insights, predictions):
         print(f"Supabase save error: {e}")
 
 
-# ─── Cache helper — works with both TTLCache and plain dict ──────────────────
 def cache_get(key: str):
     try:
         return cache.get(key)
@@ -250,44 +375,102 @@ def cache_set(key: str, value):
         pass
 
 
+def infer_numeric_columns(df: pd.DataFrame, preferred: list[str]) -> pd.Series:
+    """
+    If none of the preferred canonical columns exist, find the first
+    purely numeric column in the DataFrame as a fallback.
+    """
+    for col in preferred:
+        if has_col(df, col):
+            return safe_col(df, col)
+    # fallback: first numeric column
+    for col in df.columns:
+        s = pd.to_numeric(df[col], errors="coerce")
+        if s.notna().sum() > 0 and s.sum() != 0:
+            return s.fillna(0)
+    return pd.Series([0] * len(df))
+
+
+def debug_columns(df: pd.DataFrame, industry: str) -> dict:
+    """Return column info for debugging when analysis gives all zeros."""
+    return {
+        "debug": True,
+        "industry": industry,
+        "raw_columns": list(df.columns),
+        "row_count": len(df),
+        "sample_row": df.head(1).to_dict(orient="records")[0] if len(df) > 0 else {},
+    }
+
+
 # ============================================
-# INDUSTRY ANALYZERS
+# INDUSTRY ANALYZERS — all upgraded
 # ============================================
 
 def analyze_marketing(df: pd.DataFrame) -> dict:
     df = fuzzy_map_columns(df)
-    spend = safe_col(df, "spend").sum()
-    installs = safe_col(df, "installs").sum()
-    revenue = safe_col(df, "revenue").sum()
-    active = safe_col(df, "active_users").sum() or installs * 0.7
+
+    spend = infer_numeric_columns(df, ["spend"]).sum()
+    installs = infer_numeric_columns(df, ["installs"]).sum()
+    revenue = infer_numeric_columns(df, ["revenue"]).sum()
+    active = safe_col(df, "active_users").sum() or (installs * 0.7)
+
     cac = round(spend / installs, 2) if installs > 0 else 0
     ltv = round(revenue / active, 2) if active > 0 else 0
     roi = round(((revenue - spend) / spend) * 100, 2) if spend > 0 else 0
+
     b = BENCHMARKS["marketing"]
+
+    # Trend prediction on revenue if multiple rows
+    predictions = []
+    if "revenue" in df.columns and len(df) > 3:
+        trend = predict_trend(safe_col(df, "revenue").tolist())
+        if trend:
+            predictions = [{"metric": "Revenue", **trend}]
+
+    insights = [
+        {"status": "excellent" if roi > b["avg_roi"] else "warning",
+         "message": f"ROI is {'above' if roi > b['avg_roi'] else 'below'} India avg of {b['avg_roi']}%"},
+        {"status": "excellent" if cac < b["avg_cac"] else "warning",
+         "message": f"CAC ₹{cac} vs India avg ₹{b['avg_cac']}"},
+        {"status": "excellent" if ltv > b["avg_ltv"] else "info",
+         "message": f"LTV ₹{ltv} vs India avg ₹{b['avg_ltv']}"},
+    ]
+
     return {
         "industry": "marketing",
-        "metrics": {"CAC": f"₹{cac}", "LTV": f"₹{ltv}", "ROI": f"{roi}%"},
+        "metrics": {"CAC": f"₹{cac}", "LTV": f"₹{ltv}", "ROI": f"{roi}%",
+                    "Total Spend": f"₹{spend:,.0f}", "Total Revenue": f"₹{revenue:,.0f}"},
         "chart_data": [
             {"name": "CAC",  "Yours": cac,  "India Avg": b["avg_cac"]},
             {"name": "LTV",  "Yours": ltv,  "India Avg": b["avg_ltv"]},
             {"name": "ROI",  "Yours": roi,  "India Avg": b["avg_roi"]},
         ],
-        "predictions": [],
-        "insights": [{"status": "info", "message": "Marketing analysis complete"}],
+        "predictions": predictions,
+        "insights": insights,
         "source": b["source"],
+        "columns_detected": list(df.columns),
     }
 
 
 def analyze_stock(df: pd.DataFrame) -> dict:
     df = fuzzy_map_columns(df)
-    close = safe_col(df, "close")
+
+    close = infer_numeric_columns(df, ["close", "revenue", "spend"])
     if close.sum() == 0:
         close = pd.Series([random.uniform(100, 500) for _ in range(len(df))])
+
     returns = close.pct_change().dropna()
     annual_return = round(float(returns.mean()) * 252 * 100, 2)
     volatility = round(float(returns.std()) * np.sqrt(252) * 100, 2)
     sharpe = round(annual_return / volatility, 2) if volatility > 0 else 0
     win_rate = round((returns > 0).sum() / len(returns) * 100, 1) if len(returns) > 0 else 0
+
+    predictions = []
+    if len(close) > 5:
+        trend = predict_trend(close.tolist(), periods_ahead=5)
+        if trend:
+            predictions = [{"metric": "Price", **trend}]
+
     b = BENCHMARKS["stock"]
     return {
         "industry": "stock",
@@ -302,18 +485,24 @@ def analyze_stock(df: pd.DataFrame) -> dict:
             {"name": "Volatility %",    "Yours": volatility,    "India Avg": b["avg_volatility"]},
             {"name": "Sharpe Ratio",    "Yours": sharpe,        "India Avg": b["avg_sharpe"]},
         ],
-        "predictions": [],
-        "insights": [],
+        "predictions": predictions,
+        "insights": [
+            {"status": "excellent" if sharpe > b["avg_sharpe"] else "warning",
+             "message": f"Sharpe ratio {sharpe} vs India avg {b['avg_sharpe']}"},
+        ],
         "source": b["source"],
+        "columns_detected": list(df.columns),
     }
 
 
 def analyze_hr(df: pd.DataFrame) -> dict:
     df = fuzzy_map_columns(df)
-    attrition = round(safe_col(df, "attrition").mean(), 1)
-    cost_hire = round(safe_col(df, "cost_per_hire").mean(), 0)
-    time_hire = round(safe_col(df, "time_to_hire").mean(), 1)
-    engagement = round(safe_col(df, "engagement_score").mean(), 1)
+
+    attrition = round(infer_numeric_columns(df, ["attrition"]).mean(), 1)
+    cost_hire = round(infer_numeric_columns(df, ["cost_per_hire"]).mean(), 0)
+    time_hire = round(infer_numeric_columns(df, ["time_to_hire"]).mean(), 1)
+    engagement = round(infer_numeric_columns(df, ["engagement_score"]).mean(), 1)
+
     b = BENCHMARKS["hr"]
     return {
         "industry": "hr",
@@ -329,133 +518,127 @@ def analyze_hr(df: pd.DataFrame) -> dict:
             {"name": "Engagement",     "Yours": engagement, "India Avg": b["avg_engagement"]},
         ],
         "predictions": [],
-        "insights": [],
+        "insights": [
+            {"status": "warning" if attrition > b["avg_attrition"] else "excellent",
+             "message": f"Attrition {attrition}% vs India avg {b['avg_attrition']}%"},
+            {"status": "excellent" if engagement > b["avg_engagement"] else "warning",
+             "message": f"Engagement {engagement} vs India avg {b['avg_engagement']}"},
+        ],
         "source": b["source"],
+        "columns_detected": list(df.columns),
     }
 
 
-def analyze_sales(df):
+def analyze_sales(df: pd.DataFrame) -> dict:
     df = fuzzy_map_columns(df)
-    
-    # Handle empty or missing columns
+
     if df.empty:
-        return {
-            "industry": "sales",
-            "metrics": {"Error": "No data found"},
-            "chart_data": [],
-            "predictions": [],
-            "insights": [{"status": "warning", "message": "Upload CSV with deal_size and status columns"}],
-            "source": BENCHMARKS["sales"]["source"]
-        }
-    
-    deal_size = safe_col(df, "deal_size")
-    cycle_days = safe_col(df, "sales_cycle_days")
+        return {"industry": "sales", "metrics": {"Error": "No data found"},
+                "chart_data": [], "predictions": [], "insights": [], "source": BENCHMARKS["sales"]["source"]}
 
-    avg_deal = round(float(deal_size.mean()), 0) if len(deal_size) > 0 else 0
-    avg_cycle = round(float(cycle_days.mean()), 1) if len(cycle_days) > 0 else 0
-    total_pipeline = round(float(deal_size.sum()), 0) if len(deal_size) > 0 else 0
+    deal_size = infer_numeric_columns(df, ["deal_size", "revenue", "order_value"])
+    cycle_days = infer_numeric_columns(df, ["sales_cycle_days", "time_to_hire"])
 
-    # Calculate win rate
+    avg_deal = round(float(deal_size.mean()), 0)
+    avg_cycle = round(float(cycle_days.mean()), 1)
+    total_pipeline = round(float(deal_size.sum()), 0)
+
     win_rate = 30.0
     if "status" in df.columns:
-        won = df["status"].str.lower().isin(["won", "closed won", "win", "closed", "success"]).sum()
+        won = df["status"].astype(str).str.lower().isin(
+            ["won", "closed won", "win", "closed", "success", "converted",
+             "completed", "done", "achieved"]).sum()
         total = len(df)
         win_rate = round((won / total) * 100, 1) if total > 0 else 30.0
 
     b = BENCHMARKS["sales"]
-    
-    metrics = {
-        "Avg Deal Size": f"₹{avg_deal:,.0f}" if avg_deal > 0 else "N/A",
-        "Win Rate": f"{win_rate}%" if win_rate > 0 else "N/A",
-        "Avg Sales Cycle": f"{avg_cycle} days" if avg_cycle > 0 else "N/A",
-        "Total Pipeline": f"₹{total_pipeline:,.0f}" if total_pipeline > 0 else "N/A"
-    }
-
-    insights = [
-        {"status": "info", "message": f"Average deal size: ₹{avg_deal:,.0f}"},
-        {"status": "info", "message": f"Win rate: {win_rate}%"},
-        {"status": "info", "message": f"Sales cycle: {avg_cycle} days"}
-    ]
-
     return {
         "industry": "sales",
-        "metrics": metrics,
+        "metrics": {
+            "Avg Deal Size": f"₹{avg_deal:,.0f}",
+            "Win Rate": f"{win_rate}%",
+            "Avg Sales Cycle": f"{avg_cycle} days",
+            "Total Pipeline": f"₹{total_pipeline:,.0f}",
+        },
         "chart_data": [
-            {"name": "Deal Size (₹K)", "Yours": round(avg_deal/1000, 1) if avg_deal > 0 else 0, "India Avg": round(b["avg_deal_size"]/1000, 1)},
-            {"name": "Win Rate (%)", "Yours": win_rate, "India Avg": b["avg_win_rate"]},
-            {"name": "Cycle (days)", "Yours": avg_cycle, "India Avg": b["avg_cycle_days"]},
+            {"name": "Deal Size (₹K)", "Yours": round(avg_deal / 1000, 1), "India Avg": round(b["avg_deal_size"] / 1000, 1)},
+            {"name": "Win Rate (%)",   "Yours": win_rate,  "India Avg": b["avg_win_rate"]},
+            {"name": "Cycle (days)",   "Yours": avg_cycle, "India Avg": b["avg_cycle_days"]},
         ],
         "predictions": [],
-        "insights": insights,
-        "source": b["source"]
+        "insights": [
+            {"status": "excellent" if win_rate > b["avg_win_rate"] else "warning",
+             "message": f"Win rate {win_rate}% vs India avg {b['avg_win_rate']}%"},
+            {"status": "info", "message": f"Pipeline value ₹{total_pipeline:,.0f}"},
+        ],
+        "source": b["source"],
+        "columns_detected": list(df.columns),
     }
 
 
-def analyze_ecommerce(df):
+def analyze_ecommerce(df: pd.DataFrame) -> dict:
     df = fuzzy_map_columns(df)
-    
-    # Handle empty or missing columns
-    if df.empty:
-        return {
-            "industry": "ecommerce",
-            "metrics": {"Error": "No data found"},
-            "chart_data": [],
-            "predictions": [],
-            "insights": [{"status": "warning", "message": "Upload CSV with order_value and converted columns"}],
-            "source": BENCHMARKS["ecommerce"]["source"]
-        }
-    
-    order_value = safe_col(df, "order_value")
-    converted = safe_col(df, "converted")
-    cart_aband = safe_col(df, "cart_abandoned")
-    returned = safe_col(df, "returned")
 
-    aov = round(float(order_value.mean()), 2) if len(order_value) > 0 else 0
-    total_orders = int(converted.sum()) if len(converted) > 0 else 0
-    total_abandoned = int(cart_aband.sum()) if len(cart_aband) > 0 else 0
-    total_returned = int(returned.sum()) if len(returned) > 0 else 0
-    
-    cart_rate = round((total_abandoned / (total_abandoned + total_orders)) * 100, 1) if (total_abandoned + total_orders) > 0 else 0
+    if df.empty:
+        return {"industry": "ecommerce", "metrics": {"Error": "No data found"},
+                "chart_data": [], "predictions": [], "insights": [], "source": BENCHMARKS["ecommerce"]["source"]}
+
+    order_value = infer_numeric_columns(df, ["order_value", "revenue", "deal_size"])
+    converted   = infer_numeric_columns(df, ["converted", "installs"])
+    cart_aband  = infer_numeric_columns(df, ["cart_abandoned"])
+    returned    = infer_numeric_columns(df, ["returned"])
+
+    aov = round(float(order_value.mean()), 2)
+    total_orders = int(converted.sum()) if converted.sum() > 0 else len(df)
+    total_abandoned = int(cart_aband.sum())
+    total_returned = int(returned.sum())
+
+    cart_rate = round((total_abandoned / (total_abandoned + total_orders)) * 100, 1) \
+        if (total_abandoned + total_orders) > 0 else 0
     return_rate = round((total_returned / total_orders) * 100, 1) if total_orders > 0 else 0
 
     b = BENCHMARKS["ecommerce"]
-    
-    metrics = {
-        "Avg Order Value": f"₹{aov:,.2f}" if aov > 0 else "N/A",
-        "Total Orders": f"{total_orders:,}" if total_orders > 0 else "N/A",
-        "Cart Abandonment": f"{cart_rate}%" if cart_rate > 0 else "N/A",
-        "Return Rate": f"{return_rate}%" if return_rate > 0 else "N/A"
-    }
 
-    insights = [
-        {"status": "info", "message": f"Average order value: ₹{aov:,.2f}"},
-        {"status": "info", "message": f"Cart abandonment rate: {cart_rate}%"},
-        {"status": "info", "message": f"Return rate: {return_rate}%"}
-    ]
+    predictions = []
+    if len(order_value) > 3:
+        trend = predict_trend(order_value.tolist())
+        if trend:
+            predictions = [{"metric": "Order Value", **trend}]
 
     return {
         "industry": "ecommerce",
-        "metrics": metrics,
+        "metrics": {
+            "Avg Order Value": f"₹{aov:,.2f}",
+            "Total Orders": f"{total_orders:,}",
+            "Cart Abandonment": f"{cart_rate}%",
+            "Return Rate": f"{return_rate}%",
+        },
         "chart_data": [
-            {"name": "AOV (₹)", "Yours": aov, "India Avg": b["avg_aov"]},
-            {"name": "Cart Abnd (%)", "Yours": cart_rate, "India Avg": b["avg_cart_abandonment"]},
+            {"name": "AOV (₹)",        "Yours": aov,         "India Avg": b["avg_aov"]},
+            {"name": "Cart Abnd (%)",  "Yours": cart_rate,   "India Avg": b["avg_cart_abandonment"]},
             {"name": "Return Rate (%)", "Yours": return_rate, "India Avg": b["avg_return_rate"]},
         ],
-        "predictions": [],
-        "insights": insights,
-        "source": b["source"]
+        "predictions": predictions,
+        "insights": [
+            {"status": "excellent" if aov > b["avg_aov"] else "warning",
+             "message": f"AOV ₹{aov} vs India avg ₹{b['avg_aov']}"},
+            {"status": "warning" if cart_rate > b["avg_cart_abandonment"] else "excellent",
+             "message": f"Cart abandonment {cart_rate}% vs avg {b['avg_cart_abandonment']}%"},
+        ],
+        "source": b["source"],
+        "columns_detected": list(df.columns),
     }
 
 
 def analyze_research(df: pd.DataFrame) -> dict:
     df = fuzzy_map_columns(df)
-    papers = safe_col(df, "papers").sum() or len(df)
-    citations = safe_col(df, "citations").sum()
-    avg_citations = round(citations / papers, 2) if papers > 0 else 0
-    avg_if = round(safe_col(df, "impact_factor").mean(), 2)
 
-    # h-index calculation
-    citation_list = sorted(safe_col(df, "citations").tolist(), reverse=True)
+    papers = infer_numeric_columns(df, ["papers"]).sum() or len(df)
+    citations = infer_numeric_columns(df, ["citations"]).sum()
+    avg_citations = round(citations / papers, 2) if papers > 0 else 0
+    avg_if = round(infer_numeric_columns(df, ["impact_factor"]).mean(), 2)
+
+    citation_list = sorted(infer_numeric_columns(df, ["citations"]).tolist(), reverse=True)
     h_index = 0
     for i, cite in enumerate(citation_list, 1):
         if cite >= i:
@@ -474,22 +657,28 @@ def analyze_research(df: pd.DataFrame) -> dict:
             "Avg Impact Factor": avg_if,
         },
         "chart_data": [
-            {"name": "h-index",       "Yours": h_index,       "India Avg": b["avg_h_index"]},
-            {"name": "Avg Citations", "Yours": avg_citations,  "India Avg": b["avg_citations_per_paper"]},
-            {"name": "Impact Factor", "Yours": avg_if,         "India Avg": b["avg_impact_factor"]},
+            {"name": "h-index",       "Yours": h_index,      "India Avg": b["avg_h_index"]},
+            {"name": "Avg Citations", "Yours": avg_citations, "India Avg": b["avg_citations_per_paper"]},
+            {"name": "Impact Factor", "Yours": avg_if,        "India Avg": b["avg_impact_factor"]},
         ],
         "predictions": [],
-        "insights": [],
+        "insights": [
+            {"status": "excellent" if h_index > b["avg_h_index"] else "warning",
+             "message": f"h-index {h_index} vs India avg {b['avg_h_index']}"},
+        ],
         "source": b["source"],
+        "columns_detected": list(df.columns),
     }
 
 
 def analyze_medical(df: pd.DataFrame) -> dict:
     df = fuzzy_map_columns(df)
-    patients = safe_col(df, "patients").sum() or len(df)
-    readmissions = safe_col(df, "readmissions").sum()
+
+    patients = infer_numeric_columns(df, ["patients"]).sum() or len(df)
+    readmissions = infer_numeric_columns(df, ["readmissions"]).sum()
     readmission_rate = round((readmissions / patients) * 100, 2) if patients > 0 else 0
-    treatment_cost = round(safe_col(df, "treatment_cost").mean(), 2)
+    treatment_cost = round(infer_numeric_columns(df, ["treatment_cost"]).mean(), 2)
+
     b = BENCHMARKS["medical"]
     return {
         "industry": "medical",
@@ -499,21 +688,27 @@ def analyze_medical(df: pd.DataFrame) -> dict:
             "Avg Treatment Cost": f"₹{treatment_cost:,.0f}",
         },
         "chart_data": [
-            {"name": "Readmission %",         "Yours": readmission_rate,                         "India Avg": b["avg_readmission_rate"]},
-            {"name": "Treatment Cost (₹K)",   "Yours": round(treatment_cost / 1000, 1),           "India Avg": round(b["avg_cost_per_treatment"] / 1000, 1)},
+            {"name": "Readmission %",       "Yours": readmission_rate,               "India Avg": b["avg_readmission_rate"]},
+            {"name": "Treatment Cost (₹K)", "Yours": round(treatment_cost / 1000, 1), "India Avg": round(b["avg_cost_per_treatment"] / 1000, 1)},
         ],
         "predictions": [],
-        "insights": [],
+        "insights": [
+            {"status": "excellent" if readmission_rate < b["avg_readmission_rate"] else "warning",
+             "message": f"Readmission {readmission_rate}% vs India avg {b['avg_readmission_rate']}%"},
+        ],
         "source": b["source"],
+        "columns_detected": list(df.columns),
     }
 
 
 def analyze_fintech(df: pd.DataFrame) -> dict:
     df = fuzzy_map_columns(df)
-    transactions = safe_col(df, "transactions").sum() or len(df)
-    loan_amount = safe_col(df, "loan_amount").sum()
-    default_rate = safe_col(df, "default_rate").mean()
+
+    transactions = infer_numeric_columns(df, ["transactions"]).sum() or len(df)
+    loan_amount = infer_numeric_columns(df, ["loan_amount", "revenue"]).sum()
+    default_rate = infer_numeric_columns(df, ["default_rate"]).mean()
     avg_transaction = round(loan_amount / transactions, 2) if transactions > 0 else 0
+
     b = BENCHMARKS["fintech"]
     return {
         "industry": "fintech",
@@ -524,12 +719,16 @@ def analyze_fintech(df: pd.DataFrame) -> dict:
             "Default Rate": f"{round(default_rate, 2)}%",
         },
         "chart_data": [
-            {"name": "Default Rate %",     "Yours": round(default_rate, 2), "India Avg": 8.5},
-            {"name": "Avg Txn Value (₹)",  "Yours": avg_transaction,        "India Avg": b["avg_transaction_value"]},
+            {"name": "Default Rate %",    "Yours": round(default_rate, 2), "India Avg": 8.5},
+            {"name": "Avg Txn Value (₹)", "Yours": avg_transaction,        "India Avg": b["avg_transaction_value"]},
         ],
         "predictions": [],
-        "insights": [],
+        "insights": [
+            {"status": "excellent" if default_rate < 8.5 else "warning",
+             "message": f"Default rate {round(default_rate,2)}% vs industry avg 8.5%"},
+        ],
         "source": b["source"],
+        "columns_detected": list(df.columns),
     }
 
 
@@ -598,7 +797,7 @@ def sample_sales():
     statuses = ["Won", "Lost", "Won", "Won", "Lost", "Won", "Lost"]
     for i in range(20):
         rows.append({
-            "deal_id": i+1,
+            "deal_id": i + 1,
             "deal_size": random.randint(20000, 200000),
             "status": random.choice(statuses),
             "sales_cycle_days": random.randint(15, 90),
@@ -708,13 +907,11 @@ def cache_stats():
 
 @app.get("/trends/{keyword}")
 async def get_google_trends(keyword: str):
-    """Google Trends data for a keyword (5-min cache)."""
     cache_key = f"trends_{keyword.lower()}"
     cached = cache_get(cache_key)
     if cached:
         return cached
 
-    # Try real pytrends; fall back to mock if unavailable
     try:
         from pytrends.request import TrendReq
         pytrends = TrendReq(hl="en-IN", tz=330)
@@ -747,7 +944,6 @@ async def get_google_trends(keyword: str):
 
 @app.get("/stock/{symbol}")
 async def get_live_stock(symbol: str):
-    """Live stock data from Yahoo Finance (5-min cache)."""
     cache_key = f"stock_{symbol.upper()}"
     cached = cache_get(cache_key)
     if cached:
@@ -757,7 +953,6 @@ async def get_live_stock(symbol: str):
         import yfinance as yf
 
         original_symbol = symbol.upper()
-        # Auto-append .NS if no exchange suffix
         if not original_symbol.endswith(".NS") and not original_symbol.endswith(".BO"):
             nse_symbol = original_symbol + ".NS"
             ticker = yf.Ticker(nse_symbol)
@@ -800,8 +995,7 @@ async def get_live_stock(symbol: str):
                 }
 
         company_name = (
-            info.get("longName")
-            or info.get("shortName")
+            info.get("longName") or info.get("shortName")
             or original_symbol.replace(".NS", "").replace(".BO", "")
         )
 
@@ -885,6 +1079,33 @@ async def analyze_csv(
         import traceback
         traceback.print_exc()
         return {"error": f"Analysis failed: {str(e)}"}
+
+
+# ─── Debug endpoint — shows what columns were detected ───────────────────────
+@app.post("/debug-columns")
+async def debug_upload(
+    file: UploadFile = File(None),
+    industry: str = Form("marketing"),
+):
+    """
+    Upload any file and see exactly what columns PathViz detects.
+    Use this when analysis gives zero values.
+    """
+    if not file:
+        return {"error": "No file provided"}
+    contents = await file.read()
+    try:
+        df = read_uploaded_file(contents, file.filename or "")
+        mapped = fuzzy_map_columns(df.copy())
+        return {
+            "original_columns": list(df.columns),
+            "mapped_columns": list(mapped.columns),
+            "row_count": len(df),
+            "sample_rows": df.head(3).to_dict(orient="records"),
+            "mapped_sample": mapped.head(3).to_dict(orient="records"),
+        }
+    except ValueError as ve:
+        return {"error": str(ve)}
 
 
 # ============================================
