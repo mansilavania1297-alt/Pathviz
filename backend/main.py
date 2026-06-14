@@ -334,59 +334,116 @@ def analyze_hr(df: pd.DataFrame) -> dict:
     }
 
 
-def analyze_sales(df: pd.DataFrame) -> dict:
+def analyze_sales(df):
     df = fuzzy_map_columns(df)
-    avg_deal = round(safe_col(df, "deal_size").mean(), 0)
-    avg_cycle = round(safe_col(df, "sales_cycle_days").mean(), 1)
-    status_col = df.get("status", pd.Series(dtype=str))
-    win_rate = 0.0
-    if len(status_col) > 0:
-        won = status_col.str.lower().str.contains("won|win|closed", na=False).sum()
-        win_rate = round(won / len(status_col) * 100, 1)
+    
+    # Handle empty or missing columns
+    if df.empty:
+        return {
+            "industry": "sales",
+            "metrics": {"Error": "No data found"},
+            "chart_data": [],
+            "predictions": [],
+            "insights": [{"status": "warning", "message": "Upload CSV with deal_size and status columns"}],
+            "source": BENCHMARKS["sales"]["source"]
+        }
+    
+    deal_size = safe_col(df, "deal_size")
+    cycle_days = safe_col(df, "sales_cycle_days")
+
+    avg_deal = round(float(deal_size.mean()), 0) if len(deal_size) > 0 else 0
+    avg_cycle = round(float(cycle_days.mean()), 1) if len(cycle_days) > 0 else 0
+    total_pipeline = round(float(deal_size.sum()), 0) if len(deal_size) > 0 else 0
+
+    # Calculate win rate
+    win_rate = 30.0
+    if "status" in df.columns:
+        won = df["status"].str.lower().isin(["won", "closed won", "win", "closed", "success"]).sum()
+        total = len(df)
+        win_rate = round((won / total) * 100, 1) if total > 0 else 30.0
+
     b = BENCHMARKS["sales"]
+    
+    metrics = {
+        "Avg Deal Size": f"₹{avg_deal:,.0f}" if avg_deal > 0 else "N/A",
+        "Win Rate": f"{win_rate}%" if win_rate > 0 else "N/A",
+        "Avg Sales Cycle": f"{avg_cycle} days" if avg_cycle > 0 else "N/A",
+        "Total Pipeline": f"₹{total_pipeline:,.0f}" if total_pipeline > 0 else "N/A"
+    }
+
+    insights = [
+        {"status": "info", "message": f"Average deal size: ₹{avg_deal:,.0f}"},
+        {"status": "info", "message": f"Win rate: {win_rate}%"},
+        {"status": "info", "message": f"Sales cycle: {avg_cycle} days"}
+    ]
+
     return {
         "industry": "sales",
-        "metrics": {
-            "Avg Deal Size": f"₹{int(avg_deal):,}",
-            "Win Rate": f"{win_rate}%",
-            "Avg Sales Cycle": f"{avg_cycle} days",
-        },
+        "metrics": metrics,
         "chart_data": [
-            {"name": "Avg Deal (₹K)",  "Yours": round(avg_deal / 1000, 1), "India Avg": round(b["avg_deal_size"] / 1000, 1)},
-            {"name": "Win Rate %",     "Yours": win_rate,   "India Avg": b["avg_win_rate"]},
-            {"name": "Cycle Days",     "Yours": avg_cycle,  "India Avg": b["avg_cycle_days"]},
+            {"name": "Deal Size (₹K)", "Yours": round(avg_deal/1000, 1) if avg_deal > 0 else 0, "India Avg": round(b["avg_deal_size"]/1000, 1)},
+            {"name": "Win Rate (%)", "Yours": win_rate, "India Avg": b["avg_win_rate"]},
+            {"name": "Cycle (days)", "Yours": avg_cycle, "India Avg": b["avg_cycle_days"]},
         ],
         "predictions": [],
-        "insights": [],
-        "source": b["source"],
+        "insights": insights,
+        "source": b["source"]
     }
 
 
-def analyze_ecommerce(df: pd.DataFrame) -> dict:
+def analyze_ecommerce(df):
     df = fuzzy_map_columns(df)
-    aov = round(safe_col(df, "order_value").mean(), 2)
-    total = len(df)
-    cart_abandoned_count = safe_col(df, "cart_abandoned").sum()
-    returned_count = safe_col(df, "returned").sum()
-    converted_count = safe_col(df, "converted").sum()
-    cart_abandonment_rate = round(cart_abandoned_count / (cart_abandoned_count + converted_count) * 100, 1) if (cart_abandoned_count + converted_count) > 0 else 0
-    return_rate = round(returned_count / total * 100, 1) if total > 0 else 0
+    
+    # Handle empty or missing columns
+    if df.empty:
+        return {
+            "industry": "ecommerce",
+            "metrics": {"Error": "No data found"},
+            "chart_data": [],
+            "predictions": [],
+            "insights": [{"status": "warning", "message": "Upload CSV with order_value and converted columns"}],
+            "source": BENCHMARKS["ecommerce"]["source"]
+        }
+    
+    order_value = safe_col(df, "order_value")
+    converted = safe_col(df, "converted")
+    cart_aband = safe_col(df, "cart_abandoned")
+    returned = safe_col(df, "returned")
+
+    aov = round(float(order_value.mean()), 2) if len(order_value) > 0 else 0
+    total_orders = int(converted.sum()) if len(converted) > 0 else 0
+    total_abandoned = int(cart_aband.sum()) if len(cart_aband) > 0 else 0
+    total_returned = int(returned.sum()) if len(returned) > 0 else 0
+    
+    cart_rate = round((total_abandoned / (total_abandoned + total_orders)) * 100, 1) if (total_abandoned + total_orders) > 0 else 0
+    return_rate = round((total_returned / total_orders) * 100, 1) if total_orders > 0 else 0
+
     b = BENCHMARKS["ecommerce"]
+    
+    metrics = {
+        "Avg Order Value": f"₹{aov:,.2f}" if aov > 0 else "N/A",
+        "Total Orders": f"{total_orders:,}" if total_orders > 0 else "N/A",
+        "Cart Abandonment": f"{cart_rate}%" if cart_rate > 0 else "N/A",
+        "Return Rate": f"{return_rate}%" if return_rate > 0 else "N/A"
+    }
+
+    insights = [
+        {"status": "info", "message": f"Average order value: ₹{aov:,.2f}"},
+        {"status": "info", "message": f"Cart abandonment rate: {cart_rate}%"},
+        {"status": "info", "message": f"Return rate: {return_rate}%"}
+    ]
+
     return {
         "industry": "ecommerce",
-        "metrics": {
-            "Avg Order Value": f"₹{aov:,.0f}",
-            "Cart Abandonment": f"{cart_abandonment_rate}%",
-            "Return Rate": f"{return_rate}%",
-        },
+        "metrics": metrics,
         "chart_data": [
-            {"name": "AOV (₹)",           "Yours": aov,                  "India Avg": b["avg_aov"]},
-            {"name": "Cart Abandon %",    "Yours": cart_abandonment_rate, "India Avg": b["avg_cart_abandonment"]},
-            {"name": "Return Rate %",     "Yours": return_rate,           "India Avg": b["avg_return_rate"]},
+            {"name": "AOV (₹)", "Yours": aov, "India Avg": b["avg_aov"]},
+            {"name": "Cart Abnd (%)", "Yours": cart_rate, "India Avg": b["avg_cart_abandonment"]},
+            {"name": "Return Rate (%)", "Yours": return_rate, "India Avg": b["avg_return_rate"]},
         ],
         "predictions": [],
-        "insights": [],
-        "source": b["source"],
+        "insights": insights,
+        "source": b["source"]
     }
 
 
@@ -478,13 +535,13 @@ def analyze_fintech(df: pd.DataFrame) -> dict:
 
 ANALYZERS = {
     "marketing": analyze_marketing,
-    "stock":     analyze_stock,
-    "hr":        analyze_hr,
-    "sales":     analyze_sales,
+    "stock": analyze_stock,
+    "hr": analyze_hr,
+    "sales": analyze_sales,
     "ecommerce": analyze_ecommerce,
-    "research":  analyze_research,
-    "medical":   analyze_medical,
-    "fintech":   analyze_fintech,
+    "research": analyze_research,
+    "medical": analyze_medical,
+    "fintech": analyze_fintech,
 }
 
 
@@ -537,25 +594,28 @@ def sample_hr():
 
 
 def sample_sales():
-    statuses = ["Won", "Lost", "Won", "Won", "Lost", "Won", "Lost"]
     rows = []
-    for _ in range(20):
+    statuses = ["Won", "Lost", "Won", "Won", "Lost", "Won", "Lost"]
+    for i in range(20):
         rows.append({
+            "deal_id": i+1,
             "deal_size": random.randint(20000, 200000),
             "status": random.choice(statuses),
             "sales_cycle_days": random.randint(15, 90),
+            "region": random.choice(["North", "South", "East", "West"])
         })
     return pd.DataFrame(rows)
 
 
 def sample_ecommerce():
     rows = []
-    for _ in range(30):
+    for i in range(30):
         rows.append({
+            "order_id": f"ORD{1000+i}",
             "order_value": round(random.uniform(500, 3000), 2),
-            "cart_abandoned": random.randint(0, 1),
-            "returned": random.randint(0, 1),
-            "converted": random.randint(50, 300),
+            "cart_abandoned": random.choice([0, 0, 0, 1]),
+            "returned": random.choice([0, 0, 0, 0, 0, 1]),
+            "converted": random.randint(50, 300)
         })
     return pd.DataFrame(rows)
 
@@ -598,13 +658,13 @@ def sample_fintech():
 
 SAMPLE_GENERATORS = {
     "marketing": sample_marketing,
-    "stock":     sample_stock,
-    "hr":        sample_hr,
-    "sales":     sample_sales,
+    "stock": sample_stock,
+    "hr": sample_hr,
+    "sales": sample_sales,
     "ecommerce": sample_ecommerce,
-    "research":  sample_research,
-    "medical":   sample_medical,
-    "fintech":   sample_fintech,
+    "research": sample_research,
+    "medical": sample_medical,
+    "fintech": sample_fintech,
 }
 
 MOCK_APIS = ["google_ads", "meta_ads", "hubspot"]
